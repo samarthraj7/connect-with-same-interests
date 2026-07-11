@@ -1,0 +1,27 @@
+# Secrets & local data
+.env
+backend/.env
+**/.env
+
+# Research cache / CRM local stores
+backend/profiles/
+backend/interactions/
+backend/users/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Node / Expo
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+
+# OS / IDE
+.DS_Store
+.claude/
+*.log

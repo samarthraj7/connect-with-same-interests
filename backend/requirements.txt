@@ -1,0 +1,28 @@
+# Connect Deeply — Python dependencies (backend CLI + API)
+# Install:
+#   cd backend
+#   python3 -m pip install -r requirements.txt
+#
+# Then run API:
+#   python3 -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+#
+# Or CLI:
+#   python3 cli.py --name "Someone" --tier detailed
+#
+# Mobile app deps are separate (Node/npm):
+#   cd mobile && npm install
+
+# HTTP clients / scraping
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+
+# Env + Gemini
+python-dotenv>=1.0.0
+google-genai>=1.0.0
+
+# Mobile / HTTP API
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.0.0
+httpx>=0.27.0

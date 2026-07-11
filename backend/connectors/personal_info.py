@@ -1,0 +1,381 @@
+"""Deep personal-info dig using expert biographical-researcher prompts.
+
+Each factual milestone (birthplace, where raised, current location, hobbies,
+sports/weekends, family) is queried with a strict multi-step sequence:
+intent check → public-record retrieval → synthesis with explicit gap handling
+(closest verified geographic/personal context when the exact fact is not public).
+Never invents details.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from concurrent.futures import ThreadPoolExecutor
+from typing import List, Optional, Tuple
+
+from google import genai
+from google.genai import errors, types
+
+from gemini_retry import generate_with_retry
+
+MODEL = os.environ.get("GEMINI_MODEL") or "gemini-2.5-flash"
+
+# Milestone-specific researcher prompts. Each asks one strict factual question
+# and requires verified public evidence — or an explicit "not public" + closest
+# verified alternative (never a guess).
+_MILESTONES = [
+    {
+        "key": "birthplace",
+        "question": "Where was {name} born?",
+        "milestone": "exact place of birth (city/town and country when stated)",
+        "search_bias": (
+            'born OR "born in" OR birthplace OR "place of birth" OR native OR '
+            '"originally from" alumni directory biography interview'
+        ),
+        "fields": ["born_or_hometown"],
+    },
+    {
+        "key": "raised",
+        "question": "Where was {name} raised / where did they grow up?",
+        "milestone": "where they grew up or were raised",
+        "search_bias": (
+            '"grew up" OR "raised in" OR hometown OR childhood OR "spent childhood" '
+            "OR \"from\" alumni directory interview biography"
+        ),
+        "fields": ["raised_in"],
+    },
+    {
+        "key": "current_location",
+        "question": "Where does {name} live now / where are they based?",
+        "milestone": "current city/region of residence or where they are based",
+        "search_bias": (
+            '"based in" OR "lives in" OR "living in" OR "resides in" OR '
+            '"located in" OR "San Francisco" OR "Los Angeles" OR "New York" '
+            "executive bio company directory"
+        ),
+        "fields": ["current_location"],
+    },
+    {
+        "key": "hobbies_lifestyle",
+        "question": (
+            "What hobbies, sports, or weekend activities does {name} publicly "
+            "mention enjoying?"
+        ),
+        "milestone": "hobbies, sports interests, and weekend preferences",
+        "search_bias": (
+            'hobby OR hobbies OR "spare time" OR weekend OR "outside of work" OR '
+            "sports OR soccer OR cricket OR tennis OR golf OR running OR hiking OR "
+            "music OR cooking OR travel interview podcast bio"
+        ),
+        "fields": ["hobbies", "sports_interests", "weekend_preferences"],
+    },
+    {
+        "key": "family",
+        "question": "What family background about {name} is publicly documented?",
+        "milestone": "family background (parents, spouse, children, siblings) only if public",
+        "search_bias": (
+            "family OR parents OR spouse OR married OR children OR "
+            '"son of" OR "daughter of" OR siblings wedding announcement biography'
+        ),
+        "fields": ["family_background"],
+    },
+]
+
+_RESEARCHER_PROMPT = """Act as an expert biographical researcher. Analyze this request:
+"{question}"
+
+Execute using this multi-step sequence:
+
+1. INTENT & CONSTRAINT CHECK
+Target subject: {name}
+Known context (may help disambiguate — do NOT treat as answers):
+{context}
+Specific factual milestone requested: {milestone}
+Treat this as a strict factual query requiring verified biographical data.
+Do not guess or extrapolate.
+
+2. INFORMATION RETRIEVAL
+Search verified public records and open web sources: alumni directories, university
+profiles, professional/executive bios, company directories, LinkedIn public headline/
+about text only if indexed in search results, reliable media, interviews, personal
+blogs, speaker bios, local news.
+Bias search toward: {search_bias}
+Do not use login-gated social feeds as a source.
+
+3. DATA SYNTHESIS & GAP HANDLING
+- If the exact milestone fact is found and verified in a public source, put it in
+  "direct_answer" and set "exact_found" to true.
+- If the exact fact is NOT publicly documented, set "exact_found" to false,
+  set "direct_answer" to a clear statement that it is not public knowledge,
+  and fill "closest_verified_context" with the closest verified geographic or
+  personal context available (e.g. where they grew up, university attended,
+  early-career city, current base). Never hallucinate a location or fact.
+- Populate structured fields only with verified values; use null / [] otherwise.
+- Add short evidence entries (fact + source_hint) for every claim you keep.
+
+4. OUTPUT
+Respond with strict JSON only, no markdown fences:
+{{
+  "exact_found": boolean,
+  "direct_answer": string,
+  "closest_verified_context": string or null,
+  "born_or_hometown": string or null,
+  "raised_in": string or null,
+  "current_location": string or null,
+  "lived_in": [string],
+  "hobbies": [string],
+  "sports_interests": [string],
+  "weekend_preferences": [string],
+  "family_background": [string],
+  "personal_notes": [string],
+  "evidence": [{{"fact": string, "source_hint": string or null}}]
+}}
+"""
+
+
+def search_personal_info(
+    name: str,
+    company: Optional[str] = None,
+    university: Optional[str] = None,
+    place: Optional[str] = None,
+) -> dict:
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return {"status": "skipped", "reason": "GEMINI_API_KEY not set"}
+
+    context = _context_line(name, company, university, place)
+    print(f"  [personal_info] biographical research dig for {name!r}")
+
+    client = genai.Client(api_key=api_key)
+    with ThreadPoolExecutor(max_workers=len(_MILESTONES)) as pool:
+        futures = {
+            m["key"]: pool.submit(_run_milestone, client, name, context, m)
+            for m in _MILESTONES
+        }
+        milestone_results = {key: fut.result() for key, fut in futures.items()}
+
+    return _merge(milestone_results)
+
+
+def _context_line(
+    name: str,
+    company: Optional[str],
+    university: Optional[str],
+    place: Optional[str],
+) -> str:
+    bits = [f'- Name: "{name}"']
+    if company:
+        bits.append(f'- Company/org: "{company}"')
+    if university:
+        bits.append(f'- University/school: "{university}"')
+    if place:
+        bits.append(f'- Place hint: "{place}"')
+    if len(bits) == 1:
+        bits.append("- (no extra disambiguation hints)")
+    return "\n".join(bits)
+
+
+def _run_milestone(client, name: str, context: str, milestone: dict) -> dict:
+    key = milestone["key"]
+    question = milestone["question"].format(name=name)
+    print(f"  [personal_info] milestone={key}: {question}")
+
+    prompt = _RESEARCHER_PROMPT.format(
+        question=question,
+        name=name,
+        context=context,
+        milestone=milestone["milestone"],
+        search_bias=milestone["search_bias"],
+    )
+    try:
+        response = generate_with_retry(
+            client,
+            model=MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())]),
+        )
+    except (errors.ClientError, errors.ServerError) as exc:
+        return {"status": "error", "milestone": key, "error": str(exc)}
+    except Exception as exc:
+        return {"status": "error", "milestone": key, "error": str(exc)}
+
+    parsed = _extract_json(response.text or "")
+    if parsed is None:
+        return {
+            "status": "error",
+            "milestone": key,
+            "error": "could not parse biographical research response as JSON",
+            "raw_text": (response.text or "")[:500],
+        }
+
+    has_signal = bool(
+        parsed.get("exact_found")
+        or parsed.get("born_or_hometown")
+        or parsed.get("raised_in")
+        or parsed.get("current_location")
+        or parsed.get("hobbies")
+        or parsed.get("sports_interests")
+        or parsed.get("weekend_preferences")
+        or parsed.get("family_background")
+        or parsed.get("closest_verified_context")
+        or parsed.get("evidence")
+    )
+    parsed["status"] = "ok" if has_signal else "not_found"
+    parsed["milestone"] = key
+    parsed["question"] = question
+    parsed["_source_urls"] = _grounding_urls(response)
+    return parsed
+
+
+def _merge(milestone_results: dict) -> dict:
+    ordered = [milestone_results[m["key"]] for m in _MILESTONES if m["key"] in milestone_results]
+
+    answers = {}
+    for m in _MILESTONES:
+        r = milestone_results.get(m["key"]) or {}
+        answers[m["key"]] = {
+            "question": r.get("question") or m["question"],
+            "exact_found": bool(r.get("exact_found")),
+            "direct_answer": r.get("direct_answer"),
+            "closest_verified_context": r.get("closest_verified_context"),
+            "status": r.get("status"),
+        }
+
+    merged = {
+        "born_or_hometown": _first_non_null(ordered, "born_or_hometown"),
+        "raised_in": _first_non_null(ordered, "raised_in"),
+        "current_location": _first_non_null(ordered, "current_location"),
+        "lived_in": _dedupe_list(r.get("lived_in") for r in ordered),
+        "hobbies": _dedupe_list(r.get("hobbies") for r in ordered),
+        "sports_interests": _dedupe_list(r.get("sports_interests") for r in ordered),
+        "weekend_preferences": _dedupe_list(r.get("weekend_preferences") for r in ordered),
+        "family_background": _dedupe_list(r.get("family_background") for r in ordered),
+        "personal_notes": _dedupe_list(r.get("personal_notes") for r in ordered),
+        "evidence": _dedupe_evidence(r.get("evidence") for r in ordered),
+        "milestone_answers": answers,
+        "search_angles": [
+            {
+                "milestone": r.get("milestone"),
+                "status": r.get("status"),
+                "exact_found": bool(r.get("exact_found")),
+            }
+            for r in ordered
+        ],
+        "sources": [
+            {"url": url, "title": title}
+            for url, title in _dedupe_urls(r.get("_source_urls") for r in ordered)
+        ],
+    }
+
+    # Bridge birthplace gap: if exact birth city unknown, surface closest verified geo context
+    birth = answers.get("birthplace") or {}
+    if not merged["born_or_hometown"]:
+        if birth.get("closest_verified_context"):
+            merged["birthplace_note"] = (
+                "Exact birth city is not public knowledge. "
+                f"Closest verified geographic context: {birth['closest_verified_context']}"
+            )
+        elif birth.get("direct_answer"):
+            merged["birthplace_note"] = birth["direct_answer"]
+
+    has_any = any(
+        [
+            merged["born_or_hometown"],
+            merged["raised_in"],
+            merged["current_location"],
+            merged["lived_in"],
+            merged["hobbies"],
+            merged["sports_interests"],
+            merged["weekend_preferences"],
+            merged["family_background"],
+            merged["personal_notes"],
+            merged.get("birthplace_note"),
+            any(a.get("exact_found") or a.get("closest_verified_context") for a in answers.values()),
+        ]
+    )
+    settled = any(r.get("status") in ("ok", "not_found") for r in ordered)
+    if has_any:
+        merged["status"] = "ok"
+        merged["found"] = True
+    elif settled:
+        merged["status"] = "not_found"
+        merged["found"] = False
+    else:
+        merged["status"] = "error"
+        merged["found"] = False
+        merged["error"] = "; ".join(r["error"] for r in ordered if r.get("error"))
+    return merged
+
+
+def _first_non_null(ordered: list, field: str):
+    return next((r.get(field) for r in ordered if r.get(field)), None)
+
+
+def _dedupe_list(list_of_lists) -> list:
+    seen = set()
+    out = []
+    for lst in list_of_lists:
+        for item in lst or []:
+            if not isinstance(item, str):
+                continue
+            key = item.strip().lower()
+            if key and key not in seen:
+                seen.add(key)
+                out.append(item.strip())
+    return out
+
+
+def _dedupe_evidence(list_of_lists) -> list:
+    seen = set()
+    out = []
+    for lst in list_of_lists:
+        for item in lst or []:
+            if not isinstance(item, dict):
+                continue
+            fact = (item.get("fact") or "").strip()
+            if not fact:
+                continue
+            key = fact.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"fact": fact, "source_hint": item.get("source_hint")})
+    return out[:25]
+
+
+def _dedupe_urls(list_of_lists) -> List[Tuple[str, str]]:
+    seen = set()
+    out = []
+    for lst in list_of_lists:
+        for url, title in lst or []:
+            if url and url not in seen:
+                seen.add(url)
+                out.append((url, title))
+    return out[:15]
+
+
+def _extract_json(text: str) -> Optional[dict]:
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end == -1:
+        return None
+    try:
+        return json.loads(text[start : end + 1])
+    except json.JSONDecodeError:
+        return None
+
+
+def _grounding_urls(response) -> List[Tuple[str, str]]:
+    urls = []
+    try:
+        for candidate in response.candidates or []:
+            metadata = getattr(candidate, "grounding_metadata", None)
+            if not metadata or not metadata.grounding_chunks:
+                continue
+            for chunk in metadata.grounding_chunks:
+                web = getattr(chunk, "web", None)
+                if web and web.uri:
+                    urls.append((web.uri, web.title or ""))
+    except AttributeError:
+        pass
+    return urls

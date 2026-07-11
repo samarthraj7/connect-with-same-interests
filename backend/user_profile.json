@@ -1,0 +1,1508 @@
+{
+  "name": "Vijay Kotrappa",
+  "company": "Guidance Solutions, Inc. / The Indus Entrepreneurs (TiE)",
+  "created_at": "2026-07-10T23:24:14.346625+00:00",
+  "search_history": [
+    {
+      "fetched_at": "2026-07-10T23:24:14.346625+00:00",
+      "source_status": {
+        "github": "not_found",
+        "patents": "skipped",
+        "gemini_search": "ok",
+        "exa_search": "ok",
+        "personal_info": "ok",
+        "linkedin_public": "blocked",
+        "instagram_public": "no_public_data",
+        "facebook_public": "not_found",
+        "twitter_public": "not_found"
+      }
+    }
+  ],
+  "updated_at": "2026-07-10T23:24:14.346625+00:00",
+  "latest_sources": {
+    "github": {
+      "status": "not_found",
+      "candidates": []
+    },
+    "patents": {
+      "status": "skipped",
+      "reason": "PATENTSVIEW_API_KEY not set"
+    },
+    "gemini_search": {
+      "found": true,
+      "current_role": "Trustee/Director/Board Member",
+      "current_company": "The Indus Entrepreneurs (TiE)",
+      "career_history": [
+        "Unix Systems Engineer at Sun Microsystems, Inc.",
+        "Founder, Guidance Solutions, Inc. (1993)",
+        "President at Association of Internet Professionals",
+        "Vice President-Assess OndemandTM at USourceIT, Inc.",
+        "President, TiE SoCal (2013)",
+        "Trustee/Director/Board Member, The Indus Entrepreneurs (since 2018)",
+        "Unix Systems Engineer, Sun Microsystems, Inc.",
+        "President, Association of Internet Professionals",
+        "Vice President-Assess OndemandTM, USourceIT, Inc.",
+        "Minority Shareholder, Guidance Solutions, Inc. (since Feb 2008)",
+        "Trustee, TiE Global (2019-2020)",
+        "Trustee, The Indus Entrepreneurs (since 2018)",
+        "Board Member, TiE Los Angeles (SoCal)",
+        "Charter Member, The Indus Entrepreneurs (TiE)",
+        "Founder of Guidance Solutions, Inc. (1993)",
+        "President of TiE Socal (2013)",
+        "Trustee at The Indus Entrepreneurs (since 2018)",
+        "Treasurer at Karuna America",
+        "Officer of Karnataka Cultural Association of Southern California",
+        "Founder, Guidance Solutions, Inc. (1993-2008, remained minority shareholder)",
+        "Trustee / Director / Board Member, The Indus Entrepreneurs (since 2018)",
+        "Founder at Guidance Solutions, Inc. (1993)"
+      ],
+      "education": [
+        "Undergraduate degree from the Indian Institute of Technology Bombay",
+        "Graduate degree and an MBA from the University of California, Los Angeles",
+        "Undergraduate degree, Indian Institute of Technology Bombay",
+        "Graduate degree, University of California, Los Angeles",
+        "MBA, University of California, Los Angeles",
+        "Graduate degree from the University of California, Los Angeles (UCLA)",
+        "MBA from the University of California, Los Angeles (UCLA)",
+        "MS from UCLA",
+        "Graduate degree from the University of California, Los Angeles",
+        "MBA from the University of California, Los Angeles"
+      ],
+      "bio_summary": "Vijay Kotrappa is a technology professional with deep experience in e-commerce and consumer branded internet systems, and some experience in enterprise integration. He is a co-founder of Guidance Solutions, Inc., a website development company established in 1993. His career also includes roles as Unix Systems Engineer at Sun Microsystems, Inc., President at the Association of Internet Professionals, and Vice President-Assess OndemandTM at USourceIT, Inc.. He has been a Trustee/Director/Board Member at The Indus Entrepreneurs (TiE) since 2018, and served as President of TiE SoCal in 2013. Kotrappa is also an angel investor, focusing on seed and pre-series A level investments in technology and healthcare companies. He holds an undergraduate degree from the Indian Institute of Technology Bombay and a graduate degree and an MBA from the University of California, Los Angeles.",
+      "awards_and_recognitions": [],
+      "notable_colleagues": [
+        {
+          "name": "Joe Tang",
+          "context": "Co-founder of Guidance Solutions, Inc."
+        },
+        {
+          "name": "Pillan Thirumalaisamy",
+          "context": "Co-founder of Guidance Solutions, Inc. (also referred to as T.K. Pillan)"
+        },
+        {
+          "name": "Shankar Ram",
+          "context": "Chair, TiECon Southwest 2013"
+        },
+        {
+          "name": "Mohnish Pabrai",
+          "context": "Keynote speaker at TiECon Southwest 2013"
+        },
+        {
+          "name": "Anita Raghavan",
+          "context": "Keynote speaker at TiECon Southwest 2013"
+        },
+        {
+          "name": "Jai Khanna",
+          "context": "Keynote speaker at TiECon Southwest 2013"
+        },
+        {
+          "name": "Ami Bera",
+          "context": "Congressman, welcomed at TiECon Southwest 2013"
+        },
+        {
+          "name": "Pillan Thirumalaisamy (T.K. Pillan)",
+          "context": "Co-founder of Guidance Solutions, Inc."
+        },
+        {
+          "name": "Ambrish (A.J.) Patel",
+          "context": "Founder of The Indus Entrepreneurs (TiE)"
+        },
+        {
+          "name": "Suhas Patil",
+          "context": "Co-founder and first official President of TiE"
+        },
+        {
+          "name": "Kanwal Rekhi",
+          "context": "Co-founder and President Elect of TiE"
+        },
+        {
+          "name": "Roy Prasad",
+          "context": "Co-founder of TiE"
+        },
+        {
+          "name": "Bipin Shah",
+          "context": "Co-founder of TiE"
+        },
+        {
+          "name": "Kailash Joshi",
+          "context": "Co-founder of TiE"
+        },
+        {
+          "name": "Raidu (Ray) Vrudhula",
+          "context": "Co-founder of TiE"
+        },
+        {
+          "name": "Narpat Bhandari",
+          "context": "Co-founder of TiE"
+        },
+        {
+          "name": "Sam Sathya",
+          "context": "Co-founder of TiE"
+        },
+        {
+          "name": "Sunita Kanchinadam",
+          "context": "President of TiE Boston"
+        },
+        {
+          "name": "Purnanand Sarma",
+          "context": "Outgoing President of TiE Boston"
+        }
+      ],
+      "senior_colleagues": [
+        {
+          "name": "Jason Meugniot",
+          "title": "Owner and CEO",
+          "context": "Purchased Guidance Solutions, Inc. from its founders in 2008",
+          "seniority": "C-level"
+        },
+        {
+          "name": "Jon Provisor",
+          "title": "Owner and CIO",
+          "context": "Purchased Guidance Solutions, Inc. from its founders in 2008",
+          "seniority": "C-level"
+        },
+        {
+          "name": "Lisa Brewer",
+          "title": "COO",
+          "context": "COO of Guidance Solutions, Inc.",
+          "seniority": "C-level"
+        },
+        {
+          "name": "Jon Larsen",
+          "title": "VP, Information Systems and Managed Services",
+          "context": "VP, Information Systems and Managed Services at Guidance Solutions, Inc.",
+          "seniority": "VP"
+        },
+        {
+          "name": "Joe Tang",
+          "title": null,
+          "context": "Co-founder of Guidance Solutions, Inc.",
+          "seniority": "other"
+        },
+        {
+          "name": "Dr. H. Sudarshan",
+          "title": "Honorary Chairman",
+          "context": "Honorary Chairman at Karuna America, where Vijay Kotrappa is Treasurer.",
+          "seniority": "Board"
+        },
+        {
+          "name": "Dr. G.K. Surya Prakash",
+          "title": "President",
+          "context": "President at Karuna America, where Vijay Kotrappa is Treasurer.",
+          "seniority": "C-level"
+        },
+        {
+          "name": "Srinivas Bhat",
+          "title": "Secretary",
+          "context": "Secretary at Karuna America, where Vijay Kotrappa is Treasurer.",
+          "seniority": "other"
+        },
+        {
+          "name": "Leela Mudiyam",
+          "title": "Director",
+          "context": "Director at Karuna America, where Vijay Kotrappa is Treasurer.",
+          "seniority": "Director"
+        },
+        {
+          "name": "Shankar",
+          "title": "Chair of TiE SoCal Angels",
+          "context": "Current Chair of TiE SoCal Angels, associated with TiE SoCal where Vijay Kotrappa is a Trustee and past President.",
+          "seniority": "other"
+        },
+        {
+          "name": "Venkat Tadanki",
+          "title": "Founding Board Member, TiE SoCal Angel Fund",
+          "context": "Founding Board member of TiE SoCal Angel Fund, associated with TiE SoCal where Vijay Kotrappa is a Trustee and past President.",
+          "seniority": "Board"
+        },
+        {
+          "name": "Yash Shah",
+          "title": "Chair, Global Board of Trustees",
+          "context": "Chair of the TiE Global Board of Trustees.",
+          "seniority": "Board"
+        },
+        {
+          "name": "Murali Bukkapatnam",
+          "title": "Chair, Global Board of Trustees",
+          "context": "Elected Chair of the TiE Global Board of Trustees in 2025.",
+          "seniority": "Board"
+        },
+        {
+          "name": "Anita Manwani",
+          "title": "Vice Chair, Global Board of Trustees",
+          "context": "Named Vice Chair of the TiE Global Board of Trustees in 2025.",
+          "seniority": "Board"
+        },
+        {
+          "name": "Members of the Board",
+          "title": "Board Member",
+          "context": "Vijay Kotrappa is a Board Member of TiE Los Angeles (SoCal).",
+          "seniority": "Board"
+        }
+      ],
+      "public_posts_or_writing": [
+        {
+          "topic": "Investment philosophy and involvement with TiE Angel Fund",
+          "source": "YouTube",
+          "snippet": "In a '5 in 5 interview for Startup Steroid' on January 6, 2021, Vijay Kotrappa discussed his background as a technology professional, his investment philosophy for angel investing (focusing on sustainability in niche areas rather than billion-dollar opportunities), his association with the TiE Angel Fund in Southern California and other TiE chapters, and his preference for investing in technology and healthcare domains."
+        },
+        {
+          "topic": "Investment philosophy and entrepreneurial advice",
+          "source": "YouTube",
+          "snippet": "In a '5 in 5 interview for Startup Steroid' from January 2021, Vijay Kotrappa discusses his background in technology and e-commerce, his role with TiE, and his investment philosophy. He focuses on seed and pre-Series A investments in technology and healthcare, looking for companies with sustainability in niche markets and founders who are primarily strong salespeople."
+        },
+        {
+          "topic": "Fostering entrepreneurship and networking tips",
+          "source": "India Journal",
+          "snippet": "As President of TiE SoCal, Vijay Kotrappa delivered a speech at TiECon Southwest 2013, outlining TiE's goal of fostering entrepreneurship and offering three tips for attendees: networking, continuous learning, and not hesitating to ask 'shamelessly'."
+        },
+        {
+          "topic": "Investment philosophy and what he looks for in founders",
+          "source": "YouTube (Startup Steroid)",
+          "snippet": "In a '5 in 5 interview for Startup Steroid' on January 6, 2021, Vijay Kotrappa discusses his background in technology, e-commerce, and consumer branded internet systems. He shares his investment philosophy, which focuses on companies with sustainability in niche areas and a market opportunity of $50-100 million. He prefers seed and pre-series A level investments where he can make a difference and looks for founders who are primarily strong salespeople."
+        },
+        {
+          "topic": "Investment philosophy, niche market investment, and traits of successful founders",
+          "source": "YouTube (Startup Steroid)",
+          "snippet": "In a '5 in 5 interview for Startup Steroid' in January 2021, Vijay Kotrappa discussed his investment philosophy, favoring companies with sustainability in niche areas, particularly in technology and healthcare. He emphasized investing at seed and pre-series A levels and highlighted the importance of a 'salesperson' mentality in founders."
+        },
+        {
+          "topic": "History of TiE, fostering entrepreneurship, and networking tips for entrepreneurs",
+          "source": "India Journal (TiECon Southwest 2013)",
+          "snippet": "As President of TiE SoCal, Vijay Kotrappa spoke at TiECon Southwest 2013, providing a brief history of TiE, its primary goal of fostering entrepreneurship, and offering attendees three valuable tips for maximizing the event: networking, learning new things, and not hesitating to ask 'shamelessly'."
+        },
+        {
+          "topic": "Investment philosophy, technology background, and involvement with TiE",
+          "source": "YouTube (Startup Steroid)",
+          "snippet": "In a '5 in 5 interview for Startup Steroid' published on January 6, 2021, Vijay Kotrappa discusses his background in technology, e-commerce, and enterprise integration. He shares his investment philosophy, highlighting his focus on seed and pre-Series A stage companies with sustainability in niche areas, particularly within technology and healthcare. He also mentions his preference for investing in companies led by strong sales-oriented founders and his association with The Indus Entrepreneurs (TiE) as a source of connections and deals."
+        }
+      ],
+      "liked_or_engaged_with": [],
+      "social_profile_links": {
+        "linkedin": null,
+        "instagram": null,
+        "facebook": null,
+        "twitter": null
+      },
+      "search_angles": [
+        {
+          "angle": "company",
+          "status": "ok",
+          "found": true
+        },
+        {
+          "angle": "leadership",
+          "status": "ok",
+          "found": true
+        },
+        {
+          "angle": "place",
+          "status": "ok",
+          "found": true
+        },
+        {
+          "angle": "posts",
+          "status": "ok",
+          "found": true
+        },
+        {
+          "angle": "general",
+          "status": "ok",
+          "found": true
+        }
+      ],
+      "sources": [
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH9pPE9EXGz8-lrgtxSoYomP-VU6nh_011IVPdkDKd1QqyNANSa4N1zbr6rOXwhJuBRiQwU3Tpm4tGezMV5wcUvV7CpK6qElaYs_1iW-c9EsOag7-dMANZ35V2lh0-sBCnHioVNSYK-EZ-jgzUDwPuZYhHPdwdFUw==",
+          "title": "marketscreener.com"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEgaiuThKArYwpwTaI3QzADwaWKojLlFUKyJkM8VZ7aq2h5hTjZLqkqECGOjAVuVIPCQdHgtw9cmuo8McHjstPd282zM35189TW3x-FHZcEp8eXU6OD-mDWpA2SrA==",
+          "title": "licindia.in"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHk6DB8OhDw3kXG6fSR9VXkMJIJT8X7jFxOYixA7bmNx0opkn3j-th54BucfuV52Iegp-C-4N4BqX-qZU5CZcb1VeRS3PuESBVKemkvAgVlj5AyLTL3whqRmAVcmaHqCD8cnqbfPf8RWyUr",
+          "title": "tiesocal.org"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHf46c6ngb2wQxKE95ScsqajbAhiFdSipZtou5wSafF3waxrZ4v0WgnNX-rBATUpba7QXKI52ua4FyKuE-PadhcFkIAnxt4Pq5GB2IEtPx7KSQCPu5MG_IPzncQkcAkpYHkHxkLDhE=",
+          "title": "youtube.com"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFPkdofcMD6lGhAEbaF9VlIahWaTIdJoqR7bgmy7-Dh2otvWrdc-l_7g7F52VyE6b_Z_xVmD51u9RUMghirPfPhJU7vxC0zJb4NX_OdAQwTOMZiYdCNYQi40_BsjVspmwknaDFaa-aK_rQInC8RyJO7GOj6NFJAPQ==",
+          "title": "marketscreener.com"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEbidCxvyTZ6kYgpCMdRQCX9jMDB_CpSkEBqZO4aJjgNCxNbNW20CCG_kHX55GFdvxIn0HJ4U9uKXI5W2rb_jTsRfMoioSPikYlxsCfhXNarRtOSobH6zr1WHg2JccJCFaFmgHOeVw=",
+          "title": "youtube.com"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHxhGw8R0MLjRJCOlwHSbqVOawTpBTgZVCPbaahDJIJfw6AQViAZVmrre9bqiD0JBVD6Jpxck4BhesBWRoApyZvzZUHIDFTAdaBMCGPXRYVpbsiuYyTml4z6ZyOTFZWYCeohFSgci7SffYh",
+          "title": "tiesocal.org"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEfFUqKlyIarevt0yR4PB2C7-knjenUQSUNsFIvh7mjIObHJqO4UOw-_KRRPti2PJJwPx7na7QJqi3i7ZTryy_NWgaFD10dpK33Lk-h00sO7nsnJ1ywe1GY-5LvdA==",
+          "title": "licindia.in"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFWbsfE07Xs6KASXizu3z1dTU8PPGg58VfnEyufNav8kBNC47_tbS5WLt4J3ykBme7eFUYAZUlnvJcqk7r5sLPblIerGO5Wd_Eb35fVN_b2wm5-STCMpRCilBaUtBoYMtnXEhO0AjUmpWpHnmXc0fRkXyemyiqbrw==",
+          "title": "marketscreener.com"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFdDoY6biWWdvMQmao6fJsrOKOlq8Ojsh_9s_NJl3OQZ_Het63Lsf22a7jIXy473_0_PMyZF6zU89fwk4gvYjo6A9Duc75Mm3rIPa1fkDhglyQlDFeFx1nZ8uOH16lY4MUvYSZ4kDaDtyNgBx8VoUSPWzkYHIc0ZUy8YsFQCSwYyulDZm_7zItcjrH0",
+          "title": "tiesocal.org"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHb6-92ORuYK7u91R1jnOXKLFSAVQfvqM4Dvf6SlK-gCbN6w-xARgLPVE_DVcJSfnFwe5g6ZcMuFdtNhGRFF5G4cA6jB4hKxdAlxH0pw9-z56NKQBWxdFBJver-cKkcs3g0aHv0X03itNeUXaUlpXPQVNbpW_fD-j-WoQ==",
+          "title": "tiesocal.org"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGtbJGpmYUqq8VQMPuADJmSFAWC6Ele2cgrRBIgEapqJJ9W4BXvP90VyHyj3VGJW2zFaccy868gN9MiaTBTi7aMeBN_IECWpSK09dWoRk1T7yKhrE6KZExKFsdyca2BIbSGxZM=",
+          "title": "karunaamerica.org"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH-TR6xWlEYrSn7dWaCI1OQrpuB7_1zj3TnQWFrTwYfoIHnbUPd1EZDiRwON4Dmni9IyS0ISyQ7Nix5_MwIpggjaoMxkb7VK2YvxdXj2yfndmvTDVVKLNnDc2Pky3g-uC16_6hk6FQ=",
+          "title": "youtube.com"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHLhPOM29kJSIkXIfKcm0Pft6rosB8FDJ_o8anVjNZQWEb4t8XoRBZ2w1d5YQ9JVKK86x5oizUuOCUPQd0zJU9rv73XAE4HaWQrAGAeOvoQH3eKwcb6Lili61fEsTALteVlcVOzhk0QViIA5bSPEGzsImsDLI3qtg==",
+          "title": "marketscreener.com"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFp-_sPx8sYZ9OZC1abPo3foO386GQ_VpB9u1nBqGTex7J4sroanq5gp0eRhaJkQ1FGnhbpwYNz71Q_KrbIctNQ4uAANOygNehOQNcWpzwl9kc8V8lanismvXa4GWhdZOv15IIB_RUhr9Gmbg==",
+          "title": "wikipedia.org"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG5V4seOjdDForj2L3h19MaTGJ20fZTVMc0xz_vgI-fEh_4s67bB5T-ThJgkO6Yx3xqAK6q4vDGn-rjOXbx2kP9md2k7W4GxYXInJG7-082PkKiZBNxFaUOgppDTsv3TBSKa6zANZUMS4cC_pVc1laCJq6XHh6PEpGS47ajc9wZVjTiCPg=",
+          "title": "hubspot.net"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFKGglsYybG0fePvRZERihMEXiXIatxpV_6p42rXkyjKBROcUwh6yNpmO8tBqH2S1kx3qm8efkX_rz-himmD_v_lJ19zDCWKCaUV0pwvlxXcFOp1f6bQziodUiJUecShfSMfrTORXCW0LIqfxoG",
+          "title": "growjo.com"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEu61GI5S6GPQsPwvgNBmsWo1FaG2QolUUcrg_qohmfDjA9zqP57qNFvexdHdOs8pVkQ48TAtkHutR6KGsSP48yVpjxZpHpSzinNlg5tBY3KIAIq01YOfd6o2aRHZkn9eqlwTbf5vb0RNSgPK2wlQ-b9nCpkLFm6XH8fDhixRd6L1BUBl6NQvWa7vC7NA==",
+          "title": "indiajournal.com"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGcc7rOI87A7jvR5MV-52-nHalJcFJ0CySx-_R-ECIEWzfbGU0rFpdu1HXaBb4X5Xi3HrjLMcXg0nit8xyk1Z2xjWn1U_XtnNwvR7GLU2taCysytxOjop3ZufYeCRsusRCv_thWDuI=",
+          "title": "youtube.com"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHmJaAjW8b7bklo3aQSrx8p2elel6WQtZfYlbNln1W0pOYAhH-waduPABl1GkwSXmAFI2nbcO0RfA1DB5taUvAiXhTR_EJsKlOEyF0ssL_UeZtX12l1Pdk2ERQ_Do8c",
+          "title": "tie.org"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFBMi_J0pxTrB5SZsyQ2BjU06FoXiQd4aTxiK1yoEYF2ENirjA5YkNGhy8Ze8VcWlH46qtJJl2Xw4f3bs4quFrKvhbYbywJmG8P6wVz0QVykmeUbJo1i0wg2v0naf15w2Z6j1k4OFYkkLfxd_SpLZvycS2Deglc_-WzOv_05X4EiHsamL9HNl-c5Sbeu_TDNV6CzHAZlAjj",
+          "title": "newsindiatimes.com"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHKnqvN82_vwQYRXPVsxsOYPnJLllG_AdgcrWtFrDmvH7I8hBorYJCeAQIGP8exVX-_uUvrsxjdbJFxZKrI9nSIQ5XGMuAsxs4EHWpFBbwRab8wljX5PwgpPmjw9Q==",
+          "title": "wikipedia.org"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFnDoMOWHqqPwsS17HIFkEFN8bvwdI9t-UrXh36D_MXw-dx5VjzXRpJp2rVrFWbBYyjSUPK9D4ZoujBtflb6iM6NyaePiwxphvSMdDHBnrXVryQ-_lNhx474k3RzWY2DrTrLzAwQz5_6O0Zu8JW7kEXavhcW2tr",
+          "title": "marketscreener.com"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHXz_4pv72JzgFCh6Hv4GzY5mo4yJf-stCJtYliG9JgEQRRW4p_4ArShaSiIvjWIk05BAWDvYl4YvwdPGSWn6QxtuZOAUPyaPDy9HaHzprAqVHFu8zw182AAXtaGmP_c5yymeNYGg==",
+          "title": "youtube.com"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFiApDt4WpVwEi2a50KbzHuVPU9Z-dyrG1CaFuXyzxZ5bgpYHR_fwLfvm8gl7wMUNDsct8NcegFUZpPM--fhWvUCxSEeiIa3cKMNeoB6wdcMRQEOS0iG9oNr1dPIzsddCR3lEnhw9xMZF0=",
+          "title": "tiesocal.org"
+        }
+      ],
+      "verified_pages": [
+        {
+          "status": "ok",
+          "requested_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH9pPE9EXGz8-lrgtxSoYomP-VU6nh_011IVPdkDKd1QqyNANSa4N1zbr6rOXwhJuBRiQwU3Tpm4tGezMV5wcUvV7CpK6qElaYs_1iW-c9EsOag7-dMANZ35V2lh0-sBCnHioVNSYK-EZ-jgzUDwPuZYhHPdwdFUw==",
+          "url": "https://in.marketscreener.com/insider/VIJAY-KOTRAPPA-A0RSR1/",
+          "title": "Vijay Kotrappa: Positions, Relations and Network - MarketScreener India",
+          "description": "Bourse : Cours de bourse en temps r\u00e9el sur Actions, Indices, Forex, Matieres Premieres - Zonebourse.com",
+          "site_name": "MarketScreener India"
+        },
+        {
+          "status": "ok",
+          "requested_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEgaiuThKArYwpwTaI3QzADwaWKojLlFUKyJkM8VZ7aq2h5hTjZLqkqECGOjAVuVIPCQdHgtw9cmuo8McHjstPd282zM35189TW3x-FHZcEp8eXU6OD-mDWpA2SrA==",
+          "url": "https://licindia.in/premium-point",
+          "title": "Premium Point - Liferay DXP",
+          "description": null,
+          "site_name": "Liferay DXP"
+        },
+        {
+          "status": "error",
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHk6DB8OhDw3kXG6fSR9VXkMJIJT8X7jFxOYixA7bmNx0opkn3j-th54BucfuV52Iegp-C-4N4BqX-qZU5CZcb1VeRS3PuESBVKemkvAgVlj5AyLTL3whqRmAVcmaHqCD8cnqbfPf8RWyUr",
+          "error": "HTTPSConnectionPool(host='tiesocal.org', port=443): Max retries exceeded with url: /socal-team/vijay-kotrappa/ (Caused by NameResolutionError(\"HTTPSConnection(host='tiesocal.org', port=443): Failed to resolve 'tiesocal.org' ([Errno 8] nodename nor servname provided, or not known)\"))"
+        },
+        {
+          "status": "ok",
+          "requested_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHf46c6ngb2wQxKE95ScsqajbAhiFdSipZtou5wSafF3waxrZ4v0WgnNX-rBATUpba7QXKI52ua4FyKuE-PadhcFkIAnxt4Pq5GB2IEtPx7KSQCPu5MG_IPzncQkcAkpYHkHxkLDhE=",
+          "url": "https://www.youtube.com/watch?v=89rbLkZhYNA",
+          "title": "Vijay Kotrappa - 5 in 5 interview for Startup Steroid",
+          "description": "Enjoy the videos and music you love, upload original content, and share it all with friends, family, and the world on YouTube.",
+          "site_name": "YouTube"
+        },
+        {
+          "status": "ok",
+          "requested_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFPkdofcMD6lGhAEbaF9VlIahWaTIdJoqR7bgmy7-Dh2otvWrdc-l_7g7F52VyE6b_Z_xVmD51u9RUMghirPfPhJU7vxC0zJb4NX_OdAQwTOMZiYdCNYQi40_BsjVspmwknaDFaa-aK_rQInC8RyJO7GOj6NFJAPQ==",
+          "url": "https://in.marketscreener.com/insider/VIJAY-KOTRAPPA-A0RSR1/",
+          "title": "Vijay Kotrappa: Positions, Relations and Network - MarketScreener India",
+          "description": "Bourse : Cours de bourse en temps r\u00e9el sur Actions, Indices, Forex, Matieres Premieres - Zonebourse.com",
+          "site_name": "MarketScreener India"
+        },
+        {
+          "status": "ok",
+          "requested_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEbidCxvyTZ6kYgpCMdRQCX9jMDB_CpSkEBqZO4aJjgNCxNbNW20CCG_kHX55GFdvxIn0HJ4U9uKXI5W2rb_jTsRfMoioSPikYlxsCfhXNarRtOSobH6zr1WHg2JccJCFaFmgHOeVw=",
+          "url": "https://www.youtube.com/watch?v=89rbLkZhYNA",
+          "title": "Vijay Kotrappa - 5 in 5 interview for Startup Steroid",
+          "description": "Enjoy the videos and music you love, upload original content, and share it all with friends, family, and the world on YouTube.",
+          "site_name": "YouTube"
+        },
+        {
+          "status": "error",
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHxhGw8R0MLjRJCOlwHSbqVOawTpBTgZVCPbaahDJIJfw6AQViAZVmrre9bqiD0JBVD6Jpxck4BhesBWRoApyZvzZUHIDFTAdaBMCGPXRYVpbsiuYyTml4z6ZyOTFZWYCeohFSgci7SffYh",
+          "error": "HTTPSConnectionPool(host='tiesocal.org', port=443): Max retries exceeded with url: /socal-team/vijay-kotrappa/ (Caused by NameResolutionError(\"HTTPSConnection(host='tiesocal.org', port=443): Failed to resolve 'tiesocal.org' ([Errno 8] nodename nor servname provided, or not known)\"))"
+        },
+        {
+          "status": "ok",
+          "requested_url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEfFUqKlyIarevt0yR4PB2C7-knjenUQSUNsFIvh7mjIObHJqO4UOw-_KRRPti2PJJwPx7na7QJqi3i7ZTryy_NWgaFD10dpK33Lk-h00sO7nsnJ1ywe1GY-5LvdA==",
+          "url": "https://licindia.in/premium-point",
+          "title": "Premium Point - Liferay DXP",
+          "description": null,
+          "site_name": "Liferay DXP"
+        }
+      ],
+      "status": "ok"
+    },
+    "exa_search": {
+      "status": "ok",
+      "linkedin_url": "https://www.linkedin.com/in/vijay-kotrappa",
+      "linkedin_search_attempts": [
+        {
+          "attempt": 1,
+          "query": "Vijay Kotrappa Guidance Solutions, Inc. / The Indus Entrepreneurs (TiE) LinkedIn profile",
+          "include_domains": null,
+          "reasoning": "baseline query",
+          "success": true
+        }
+      ],
+      "linkedin_candidates": [
+        {
+          "url": "https://www.linkedin.com/in/vijay-kotrappa",
+          "title": "vijay kotrappa | Manager And Investment Committee",
+          "published_date": "2026-05-19T22:08:39.000Z",
+          "text_snippet": null
+        },
+        {
+          "url": "https://in.linkedin.com/in/vijaybobba",
+          "title": "Vijay Bobba",
+          "published_date": "2026-06-22T15:11:36.000Z",
+          "text_snippet": null
+        },
+        {
+          "url": "https://www.linkedin.com/in/raghushivaram",
+          "title": "Raghu Shivaram - Co-Founder at Spritz | Charter Member TiE ...",
+          "published_date": null,
+          "text_snippet": null
+        },
+        {
+          "url": "https://www.linkedin.com/in/vijaynagappan",
+          "title": "Vijay Nagappan",
+          "published_date": "2026-06-06T12:07:38.000Z",
+          "text_snippet": null
+        },
+        {
+          "url": "https://www.linkedin.com/in/vijayakumar-koti-150890b3",
+          "title": "vijayakumar koti | Team Lead",
+          "published_date": "2026-05-20T19:35:00.000Z",
+          "text_snippet": null
+        },
+        {
+          "url": "https://www.linkedin.com/in/vizayk",
+          "title": "Vizay Kotikalapudi",
+          "published_date": "2026-06-22T16:15:28.000Z",
+          "text_snippet": null
+        }
+      ],
+      "reformulated": {
+        "exa_semantic_query": "Public mentions, talks, articles, interviews, and social media posts by Vijay Kotrappa, a leader at Guidance Solutions, Inc. and The Indus Entrepreneurs (TiE) in Southern California, discussing technology, entrepreneurship, or business strategy.",
+        "google_keyword_query": "\"Vijay Kotrappa\" (\"Guidance Solutions\" OR \"The Indus Entrepreneurs\" OR \"TiE\") (\"Southern California\" OR \"SoCal\") (interview OR talk OR presentation OR speaker OR article OR blog OR news OR \"press release\" OR podcast OR founder OR \"board member\" OR \"executive director\" OR \"CEO\" OR \"CTO\" OR \"CFO\" OR \"VP\" OR \"President\" OR \"managing partner\" OR \"chairman\") (-site:linkedin.com)",
+        "phrase_filters": [
+          "Vijay Kotrappa",
+          "Guidance Solutions",
+          "TiE",
+          "Southern California"
+        ]
+      },
+      "general_results": [
+        {
+          "url": "https://in.marketscreener.com/insider/VIJAY-KOTRAPPA-A0RSR1/",
+          "title": "Vijay Kotrappa: Positions, Relations and Network - MarketScreener India",
+          "published_date": null,
+          "text_snippet": "Vijay Kotrappa: Positions, Relations and Network - MarketScreener India\n\n# Vijay Kotrappa\n\nDirector/Board Member at\n\nThe Indus Entrepreneurs\n\n83 connections\n\nConsumer Services\n\nCommercial Services\n\nTechnology Services\n\n## Profile\n\nVijay Kotrappa is the founder of Guidance Solutions, Inc. (1993). Mr. Kotrappa is a Trustee at The Indus Entrepreneurs since 2018. Former positions include Unix Systems Engineer at Sun Microsystems, Inc., President at Association of Internet Professionals, and Vice Pre"
+        },
+        {
+          "url": "https://linkedin.com/in/vijay-kotrappa",
+          "title": "Vijay Kotrappa",
+          "published_date": "2026-05-19T22:08:39.000Z",
+          "text_snippet": "# Vijay Kotrappa\n\nInvestor, Fund Manager, Learn (er, ed?)\n\nHermosa Beach, California, United States (US)\n\n500 connections \u2022 1,103 followers\n\n## About\n\nInvestor, Fund Manager, Learn (er, ed?)\n\nTotal Experience: 33 years and 1 month\n\n## Experience\n\n### Manager And Investment Committee - TiE Socal Angel Fund, Women Entrepreneurs Fund, Amerikan Founders Fund, 34Nreef1 Real Estate Fund (Current)\n\nJan 2019 - Present (7 years and 3 months) in Los Angeles\n\nSource and evaluate opportunities for investmen"
+        },
+        {
+          "url": "https://en.wikipedia.org/wiki/Guidance_Solutions",
+          "title": "Guidance Solutions",
+          "published_date": null,
+          "text_snippet": "Guidance Solutions\n\nGuidance Solutions, Inc. is a website development company that builds e-commerce websites, and mobile applications for retailers such as Burlington Coat Factory and Foot Locker. The company was founded in Hawthorne, California in 1993 by Joe Tang, Pillan Thirumalaisamy, and Vijay Kotrappa.\n\n| Company type | Private |\n| --- | --- |\n| Industry | IT and Internet services |\n| Founded | California, USA (1993) |\n| Headquarters | 4134 Del Rey Ave.,, Marina del Rey, CA,, USA |\n| Key "
+        },
+        {
+          "url": "https://www.einpresswire.com/article/557971038/sold-out-2021-tiecon-southwest-inspires-attendees",
+          "title": "Sold-Out 2021 TiEcon Southwest Inspires Attendees",
+          "published_date": "2021-12-09T16:30:00.000Z",
+          "text_snippet": "Sold-Out 2021 TiEcon Southwest Inspires Attendees\n\n# Sold-Out 2021 TiEcon Southwest Inspires Attendees\n\nNews Provided By\n\nDecember 09, 2021, 16:30 GMT\n\nShare This Article\n\nAnshuman Sinha, President of TiE SoCal 2020 \u2013 2021\n\nAshish Saboo, Shankar Ram, Anshuman Sinha, Neeraj Bhavani, Vijay Kotrappa\n\nAshish Saboo & Anshuman Sinha with Women Panel \u2013 Rashi Bahri Chitnis, Brenda McCabe, Yvonne Lemus \u2013 Bosu & Connie Harrell\n\nTiE SoCal Charter Members & Volunteers\n\nTiEcon attendees enjoying lunch\n\nThe a"
+        },
+        {
+          "url": "https://www.zonebourse.com/insider/VIJAY-KOTRAPPA-A0RSR1/",
+          "title": "Vijay Kotrappa: Postes, Relations & R\u00e9seau - Zonebourse",
+          "published_date": null,
+          "text_snippet": "Vijay Kotrappa: Postes, Relations & R\u00e9seau - Zonebourse\n\n# Vijay Kotrappa\n\nDirecteur/Membre du Conseil chez\n\nThe Indus Entrepreneurs\n\n86 relations\n\nConsumer Services\n\nCommercial Services\n\nTechnology Services\n\n## Profil\n\nVijay Kotrappa is the founder of Guidance Solutions, Inc. (1993). Mr. Kotrappa is a Trustee at The Indus Entrepreneurs since 2018. Former positions include Unix Systems Engineer at Sun Microsystems, Inc., President at Association of Internet Professionals, and Vice President-Asse"
+        },
+        {
+          "url": "https://thelosangelestribune.com/2021/12/07/sold-out-2021-tiecon-southwest-inspires-attendees/",
+          "title": "Sold-Out 2021 TiEcon Southwest Inspires Attendees | The Los Angeles Tribune",
+          "published_date": "2021-12-08T05:20:14.000Z",
+          "text_snippet": "Sold-Out 2021 TiEcon Southwest Inspires Attendees | The Los Angeles Tribune Press \"Enter\" to skip to content\n\n# Sold-Out 2021 TiEcon Southwest Inspires Attendees\n\nBy The Tribune Editorial Team on December 7, 2021\n\nThe annual full-day conference delivered valuable information to investors and businesses and startup leaders in attendance.\n\nCERRITOS, CA, December 7 \u2013 On Sunday, December 5th, at the Sheraton Cerritos, TiEcon Southwest 2021 brought together local CEOs, CXOs, Angel Investors, VCs, com"
+        },
+        {
+          "url": "https://indicanews.com/the-heat-is-on-ties-global-investor-summit-attracts-hundreds-of-angel-investors/",
+          "title": "The heat is on: TiE's Global Investor Summit attracts hundreds of angel investors - indica News",
+          "published_date": "2022-08-05T12:41:04.000Z",
+          "text_snippet": "window.dataLayer = window.dataLayer || []; function gtag(){dataLayer.push(arguments);} gtag('js', new Date()); gtag('config', 'UA-114514747-1'); Google tag (gtag.js) -- The heat is on: TiE's Global Investor Summit attracts hundreds of angel investors - indica News -- The heat is on: TiE's Global Investor Summit attracts hundreds of angel investors - indica News -- --\n\nShare the news\n\nRitu Jha-At the recently concluded gala to celebrate 25 years of The IndUS Entrepreneurs\u2019 Southern California cha"
+        },
+        {
+          "url": "https://www.abnewswire.com/pressreleases/tie-socal-angels-press-release-tie-socal-announces-its-first-membersonly-fund_503387.html",
+          "title": "TiE SoCal Angels Press Release \u2013 TiE SoCal Announces its First Members-Only Fund | ABNewswire",
+          "published_date": null,
+          "text_snippet": "TiE SoCal Angels Press Release \u2013 TiE SoCal Announces its First Members-Only Fund | ABNewswire\n\n# Sunday - June 14, 2026\n\nTiE SoCal is pleased to announce its first members-only fund, TiE SoCal Angels Fund 2020. This fund was initiated at the request of the members of TiE Southern California to provide diverse investment opportunities for our members and strategic capital for early-stage companies.\n\nThe TiE SoCal Angels Fund 2020 raised over 1 million dollars from TiE SoCal Charter Members. At th"
+        }
+      ],
+      "mentions": [
+        {
+          "platform": "MarketScreener",
+          "post_text": "Vijay Kotrappa: Positions, Relations and Network - MarketScreener India\n\nDirector/Board Member at The Indus Entrepreneurs\n83 connections\nConsumer Services\nCommercial Services\nTechnology Services\n\nProfile\nVijay Kotrappa is the founder of Guidance Solutions, Inc. (1993). Mr. Kotrappa is a Trustee at The Indus Entrepreneurs since 2018. Former positions include Unix Systems Engineer at Sun Microsystems, Inc., President at Association of Internet Professionals, and Vice Pre",
+          "relevance_score": 1.0,
+          "author": null,
+          "timestamp": null,
+          "url": "https://in.marketscreener.com/insider/VIJAY-KOTRAPPA-A0RSR1/",
+          "title": "Vijay Kotrappa: Positions, Relations and Network - MarketScreener India"
+        },
+        {
+          "platform": "LinkedIn",
+          "post_text": "# Vijay Kotrappa\n\nInvestor, Fund Manager, Learn (er, ed?)\n\nHermosa Beach, California, United States (US)\n\n500 connections \u2022 1,103 followers\n\n## About\n\nInvestor, Fund Manager, Learn (er, ed?)\n\nTotal Experience: 33 years and 1 month\n\n## Experience\n\n### Manager And Investment Committee - TiE Socal Angel Fund, Women Entrepreneurs Fund, Amerikan Founders Fund, 34Nreef1 Real Estate Fund (Current)\n\nJan 2019 - Present (7 years and 3 months) in Los Angeles\n\nSource and evaluate opportunities for investment",
+          "relevance_score": 1.0,
+          "author": "Vijay Kotrappa",
+          "timestamp": null,
+          "url": "https://linkedin.com/in/vijay-kotrappa",
+          "title": "Vijay Kotrappa"
+        },
+        {
+          "platform": "Wikipedia",
+          "post_text": "Guidance Solutions\n\nGuidance Solutions, Inc. is a website development company that builds e-commerce websites, and mobile applications for retailers such as Burlington Coat Factory and Foot Locker. The company was founded in Hawthorne, California in 1993 by Joe Tang, Pillan Thirumalaisamy, and Vijay Kotrappa.\n\n| Company type | Private |\n| --- | --- |\n| Industry | IT and Internet services |\n| Founded | California, USA (1993) |\n| Headquarters | 4134 Del Rey Ave.,, Marina del Rey, CA,, USA |\n| Key",
+          "relevance_score": 0.9,
+          "author": null,
+          "timestamp": null,
+          "url": "https://en.wikipedia.org/wiki/Guidance_Solutions",
+          "title": "Guidance Solutions"
+        },
+        {
+          "platform": "Press Release",
+          "post_text": "Sold-Out 2021 TiEcon Southwest Inspires Attendees. Anshuman Sinha, President of TiE SoCal 2020 \u2013 2021. Ashish Saboo, Shankar Ram, Anshuman Sinha, Neeraj Bhavani, Vijay Kotrappa. Ashish Saboo & Anshuman Sinha with Women Panel \u2013 Rashi Bahri Chitnis, Brenda McCabe, Yvonne Lemus \u2013 Bosu & Connie Harrell.",
+          "relevance_score": 1.0,
+          "author": null,
+          "timestamp": "2021-12-09T16:30:00Z",
+          "url": "https://www.einpresswire.com/article/557971038/sold-out-2021-tiecon-southwest-inspires-attendees",
+          "title": "Sold-Out 2021 TiEcon Southwest Inspires Attendees"
+        },
+        {
+          "platform": "Zonebourse",
+          "post_text": "Vijay Kotrappa: Postes, Relations & R\u00e9seau - Zonebourse\n\n# Vijay Kotrappa\n\nDirecteur/Membre du Conseil chez\n\nThe Indus Entrepreneurs\n\n86 relations\n\nConsumer Services\n\nCommercial Services\n\nTechnology Services\n\n## Profil\n\nVijay Kotrappa is the founder of Guidance Solutions, Inc. (1993). Mr. Kotrappa is a Trustee at The Indus Entrepreneurs since 2018. Former positions include Unix Systems Engineer at Sun Microsystems, Inc., President at Association of Internet Professionals, and Vice President-Asse",
+          "relevance_score": 1.0,
+          "author": null,
+          "timestamp": null,
+          "url": "https://www.zonebourse.com/insider/VIJAY-KOTRAPPA-A0RSR1/",
+          "title": "Vijay Kotrappa: Postes, Relations & R\u00e9seau - Zonebourse"
+        },
+        {
+          "platform": "The Los Angeles Tribune",
+          "post_text": "Sold-Out 2021 TiEcon Southwest Inspires Attendees. The annual full-day conference delivered valuable information to investors and businesses and startup leaders in attendance. CERRITOS, CA, December 7 \u2013 On Sunday, December 5th, at the Sheraton Cerritos, TiEcon Southwest 2021 brought together local CEOs, CXOs, Angel Investors, VCs, com",
+          "relevance_score": 1.0,
+          "author": "The Tribune Editorial Team",
+          "timestamp": "December 7, 2021",
+          "url": "https://thelosangelestribune.com/2021/12/07/sold-out-2021-tiecon-southwest-inspires-attendees/",
+          "title": "Sold-Out 2021 TiEcon Southwest Inspires Attendees | The Los Angeles Tribune"
+        },
+        {
+          "platform": "indica News",
+          "post_text": "At the recently concluded gala to celebrate 25 years of The IndUS Entrepreneurs\u2019 Southern California cha",
+          "relevance_score": 1.0,
+          "author": "Ritu Jha",
+          "timestamp": null,
+          "url": "https://indicanews.com/the-heat-is-on-ties-global-investor-summit-attracts-hundreds-of-angel-investors/",
+          "title": "The heat is on: TiE's Global Investor Summit attracts hundreds of angel investors - indica News"
+        },
+        {
+          "platform": "ABNewswire",
+          "post_text": "TiE SoCal Angels Press Release \u2013 TiE SoCal Announces its First Members-Only Fund | ABNewswire\n\n# Sunday - June 14, 2026\n\nTiE SoCal is pleased to announce its first members-only fund, TiE SoCal Angels Fund 2020. This fund was initiated at the request of the members of TiE Southern California to provide diverse investment opportunities for our members and strategic capital for early-stage companies.\n\nThe TiE SoCal Angels Fund 2020 raised over 1 million dollars from TiE SoCal Charter Members. At th",
+          "relevance_score": 1.0,
+          "author": null,
+          "timestamp": "June 14, 2026",
+          "url": "https://www.abnewswire.com/pressreleases/tie-socal-angels-press-release-tie-socal-announces-its-first-membersonly-fund_503387.html",
+          "title": "TiE SoCal Angels Press Release \u2013 TiE SoCal Announces its First Members-Only Fund | ABNewswire"
+        }
+      ]
+    },
+    "personal_info": {
+      "born_or_hometown": null,
+      "raised_in": null,
+      "current_location": "Southern California (implied by involvement with TiE SoCal and Karnataka Cultural Association of Southern California)",
+      "lived_in": [
+        "Southern California",
+        "India (for undergraduate studies)",
+        "India",
+        "Los Angeles, CA, USA"
+      ],
+      "hobbies": [],
+      "sports_interests": [],
+      "weekend_preferences": [],
+      "family_background": [],
+      "personal_notes": [],
+      "evidence": [
+        {
+          "fact": "Vijay Kotrappa has an undergraduate degree from the Indian Institute of Technology Bombay.",
+          "source_hint": "MarketScreener India"
+        },
+        {
+          "fact": "Vijay Kotrappa has an MS and MBA from UCLA.",
+          "source_hint": "Karuna America"
+        },
+        {
+          "fact": "Vijay Kotrappa has served as an officer of the Karnataka Cultural Association of Southern California.",
+          "source_hint": "Karuna America"
+        },
+        {
+          "fact": "Vijay Kotrappa is a Trustee at The Indus Entrepreneurs since 2018.",
+          "source_hint": "MarketScreener India"
+        },
+        {
+          "fact": "Vijay Kotrappa is associated with TiE Los Angeles (SoCal).",
+          "source_hint": "TiE Los Angeles (SoCal)"
+        },
+        {
+          "fact": "He has a graduate degree and an MBA from the University of California, Los Angeles.",
+          "source_hint": "MarketScreener India, Karuna America"
+        },
+        {
+          "fact": "He has served as an officer of non-profit organizations such as The Indus Entrepreneurs and Karnataka Cultural Association of Southern California.",
+          "source_hint": "Karuna America"
+        },
+        {
+          "fact": "He is associated with TiE Los Angeles (SoCal).",
+          "source_hint": "TiE Los Angeles (SoCal)"
+        },
+        {
+          "fact": "Karuna America, where he is a Treasurer, has an address in Pomona, CA, which is in Southern California.",
+          "source_hint": "Karuna America"
+        },
+        {
+          "fact": "Vijay Kotrappa founded Guidance Solutions, Inc., which grew to over 200 employees in Los Angeles.",
+          "source_hint": "TiE SoCal Newsletter / TiE Los Angeles (SoCal) website"
+        },
+        {
+          "fact": "Guidance Solutions, Inc. was founded in Hawthorne, California, and its headquarters are in Marina del Rey, CA.",
+          "source_hint": "Wikipedia - Guidance Solutions"
+        },
+        {
+          "fact": "Vijay Kotrappa served as an officer for non-profit organizations such as The Indus Entrepreneurs (TiE) and Karnataka Cultural Association of Southern California.",
+          "source_hint": "Karuna America website"
+        },
+        {
+          "fact": "He led TiE SoCal as President in 2013.",
+          "source_hint": "TiE SoCal Newsletter / TiE Los Angeles (SoCal) website"
+        },
+        {
+          "fact": "His education includes an MS and MBA from UCLA (University of California, Los Angeles).",
+          "source_hint": "Karuna America website / MarketScreener India"
+        },
+        {
+          "fact": "In a 2021 interview, he referred to the 'TiE Angel Fund here in SoCal'.",
+          "source_hint": "YouTube - Vijay Kotrappa: 5 in 5 interview for Startup Steroid"
+        },
+        {
+          "fact": "Vijay Kotrappa is the founder of Guidance Solutions, Inc. (1993).",
+          "source_hint": "MarketScreener India"
+        },
+        {
+          "fact": "Mr. Kotrappa is a Trustee at The Indus Entrepreneurs since 2018.",
+          "source_hint": "MarketScreener India"
+        },
+        {
+          "fact": "He has a deep technology experience in terms of e-commerce and consumer branded internet systems.",
+          "source_hint": "5 in 5 interview for Startup Steroid"
+        },
+        {
+          "fact": "His education includes a graduate degree and an MBA from the University of California, Los Angeles.",
+          "source_hint": "MarketScreener India"
+        },
+        {
+          "fact": "He also has an undergraduate degree from the Indian Institute of Technology Bombay.",
+          "source_hint": "MarketScreener India"
+        },
+        {
+          "fact": "He is associated with TiE in SoCal (Southern California).",
+          "source_hint": "TiE Los Angeles (SoCal)"
+        },
+        {
+          "fact": "He has an undergraduate degree from the Indian Institute of Technology Bombay.",
+          "source_hint": "MarketScreener India"
+        },
+        {
+          "fact": "He has served as an officer of several non-profit organizations such as The Indus Entrepreneurs and Karnataka Cultural Association of Southern California.",
+          "source_hint": "Karuna America"
+        },
+        {
+          "fact": "He is a Computer Engineer and has successfully formed and led several businesses in information technology.",
+          "source_hint": "Karuna America"
+        }
+      ],
+      "milestone_answers": {
+        "birthplace": {
+          "question": "Where was Vijay Kotrappa born?",
+          "exact_found": false,
+          "direct_answer": "Vijay Kotrappa's exact place of birth is not publicly documented in the available sources.",
+          "closest_verified_context": "Vijay Kotrappa has an undergraduate degree from the Indian Institute of Technology Bombay and an MS and MBA from UCLA. He has served as an officer for organizations like the Karnataka Cultural Association of Southern California and is involved with The Indus Entrepreneurs (TiE) in Southern California.",
+          "status": "ok"
+        },
+        "raised": {
+          "question": "Where was Vijay Kotrappa raised / where did they grow up?",
+          "exact_found": false,
+          "direct_answer": "The exact location where Vijay Kotrappa was raised or grew up is not publicly documented.",
+          "closest_verified_context": "Vijay Kotrappa holds an undergraduate degree from the Indian Institute of Technology Bombay and later obtained a graduate degree and an MBA from the University of California, Los Angeles. He is currently based in Southern California and is involved with organizations like The Indus Entrepreneurs (TiE) Los Angeles (SoCal) and Karnataka Cultural Association of Southern California.",
+          "status": "ok"
+        },
+        "current_location": {
+          "question": "Where does Vijay Kotrappa live now / where are they based?",
+          "exact_found": true,
+          "direct_answer": "Vijay Kotrappa is based in Southern California, with strong connections to the Los Angeles area.",
+          "closest_verified_context": "Southern California, particularly the Los Angeles area.",
+          "status": "ok"
+        },
+        "hobbies_lifestyle": {
+          "question": "What hobbies, sports, or weekend activities does Vijay Kotrappa publicly mention enjoying?",
+          "exact_found": false,
+          "direct_answer": "Publicly available information does not specify Vijay Kotrappa's hobbies, sports interests, or weekend preferences.",
+          "closest_verified_context": "Vijay Kotrappa is the founder of Guidance Solutions, Inc. and a Trustee at The Indus Entrepreneurs (TiE) in Southern California (SoCal). He holds a graduate degree and an MBA from the University of California, Los Angeles, and an undergraduate degree from the Indian Institute of Technology Bombay.",
+          "status": "ok"
+        },
+        "family": {
+          "question": "What family background about Vijay Kotrappa is publicly documented?",
+          "exact_found": false,
+          "direct_answer": "Publicly documented information regarding Vijay Kotrappa's family background (parents, spouse, children, siblings) is not available in the retrieved sources.",
+          "closest_verified_context": "Vijay Kotrappa is the founder of Guidance Solutions, Inc. and a Trustee at The Indus Entrepreneurs (TiE). He holds a graduate degree and an MBA from the University of California, Los Angeles (UCLA), and an undergraduate degree from the Indian Institute of Technology Bombay. He has served as an officer for non-profit organizations such as The Indus Entrepreneurs and the Karnataka Cultural Association of Southern California.",
+          "status": "ok"
+        }
+      },
+      "search_angles": [
+        {
+          "milestone": "birthplace",
+          "status": "ok",
+          "exact_found": false
+        },
+        {
+          "milestone": "raised",
+          "status": "ok",
+          "exact_found": false
+        },
+        {
+          "milestone": "current_location",
+          "status": "ok",
+          "exact_found": true
+        },
+        {
+          "milestone": "hobbies_lifestyle",
+          "status": "ok",
+          "exact_found": false
+        },
+        {
+          "milestone": "family",
+          "status": "ok",
+          "exact_found": false
+        }
+      ],
+      "sources": [
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHsMEzBP6YvuNLrBL7oBuCOzunIuI_3ez5PAOaCle4gwpQZAiAgnD1-W-5PNHqWXmBl0gxLRP1UAGvSeQYJLSoKfvA7ip-mCuF5RbvZNu55VemQtt3ychNVs-OM3yQzmSEnw-RRvcIyoPd0mNUT8HtduPmuDU60ow==",
+          "title": "marketscreener.com"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFbsQ0rzt9zYbrpLvsnsm-WxJjKepmLT2G-71deOLA0a9yqkZ1TF8nAycBiQWkHYysVDc6Uq0GwEBb6Fb6aXQqXp0n_2pdVwx9PXa4sKP5dU43VlFjvjfp_BAXFNT-Ise4peDI=",
+          "title": "karunaamerica.org"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF9ZIQM4szfceqjGNoyiXCuxK0QAh_CwU2fUwoG2bw4bUq3YVmeKHj5ksac7p4TbIyjIPAT3l9LKVLkI5_xiTQOwq6PbJP7qNGTPgk3dKwewl0HyW8kQ9BiLlYwdzDOWT-dqsu9vBY=",
+          "title": "youtube.com"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGNbRB7VOEwmjZj-PUMVjpbpU1Hx_y0R5CkXbRDpt2f3WXjOS9pLcz0rzu41mBe_neqeMDqgFp2baEfDeFZACMqTnruNyfViTPXRH8TmOwWVJ5aNeC-ZvXoAZu3JzRTC5kSKbqhPS5cYQLG",
+          "title": "tiesocal.org"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFcRQ2nV0LpAFWzmV-0FRrdFYYMlSZuwwVp-9mr7NlqGrrwQtDdloYFCWhHw8jvU7FC3UJcha5pC2pirp-E6HACS7Ub_BBcAZtYR1y0NK0Z__MR7tlk-Yj25nAP52hPeC2rdOcO5J_0P8k4ndQnjWc8b2e4MX1x",
+          "title": "marketscreener.com"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQESjdmQBpYqiJwlcqwXs01evCaX2ueKBDQPA3gZSJhsmkfW2G5RZjpXMLvXOUwSNYS9s7OPzEwpxFewAQjmdifEsEOBgz2_2_RsAmrabpweIu77ycnUTFXF8CqqUhnWIf0CZQ==",
+          "title": "karunaamerica.org"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFxIcTIgQv5LGp6xpxPUsX0y-r_9fcu9KlWa9MRFgo4KJD3gjL-xcxojknhgpnzFRUKaOHo0Phwhq7qlF0IygXufAjTPvzXHnguKr6L4ZNmdhLVQzcXbZ8A-0qBNSUUp32saxLx8hrqHp0=",
+          "title": "tiesocal.org"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE4PgSlKxM-uz9r_lin4xAMo_elM1pj7Po1oLsw2BPtcvVX3BjUSFPNoSwMBuH3fLxOYeL9Wv_k__XYVXHqKeer1F0qm30Q-OKYS5XO8aokJnZrG9u4ipiiYq0I-Kx7lbwmFrDfDZF2hIvCyLxp16daoUWmkJ4gGwrDUNrXu1qiGrLkwNA7u3bnIt15",
+          "title": "tiesocal.org"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHxpUlx0o68qJEEF3LT5d7QXExz88WlQe4uaMYf3x0Kga0vRtIhwij1fT59BWTnVFZXz3fjDXeNSMEh2IksD2UfJN1-ksSGJpEi1BeeZWSIeZnaeZcMK_4nxyG_jyS_7WpnCTEPtoLqm_lddw==",
+          "title": "wikipedia.org"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEvYzopfamYu_X0KQXtRlUkyS2Y9zXBWet8hKw-aFHJPa69QrmibjrsLtu9UQ57x_mIKf4oiLPhzrIqwVaZL3iNrDC-mg7SruGXh8rv0n7NnNCNIY6cAXjIQ2Bsico-03Pij9w=",
+          "title": "karunaamerica.org"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF95vDzzVXEh7rQQ19rVbn7RcZiucGbVek_CykpTlKaBGSIRp5HUYtPgXvCbiVuxO5zN2feyfMCLR_vhJDHb2cooQdzl8hhHKFzImP2QpJKVIaEr2dLk8yHDcvFGUKu2wVLXkh9FSrlOWBjcYiNpLI0E3jEP9YdgRSJ0g==",
+          "title": "tiesocal.org"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH7hOo9mYE6dlfrAiYuO27iwh_UCCJYbvFvDR8vNW6zK3gIXS7F4YzQ0PG66Bt9K7AnzJjb2KFJJKqJRdAnXla64QoFkrlEb_MpCaazXTdgtg_lsUHBO_JMyhygqLcCRKYHXFRTEYJJIIk99G2mzXS22MUAwZH39Q==",
+          "title": "marketscreener.com"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH1QAlzvsWGdNzAybG2u4RgT_IImWi1NedeZKZrkiBmNBxo_0O-qNt0ATksG1HkhgGhiBuoNeqtzBc5062dabO4ZLdpStr6TVF89ldQZyuzJLgCrFjnMbfBzkkvMrsONzBVltqAxF8=",
+          "title": "youtube.com"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFWoXfafHajFjb1_WUTtRvpgrowJ_qNig5CXCj802Yo10JuyyCOhGrvmO0M9EA5gRIPJRULyCraNMAxIJCUQUXZ-Sfmk4VwaY9cX0J8owrF9n-YeQhvLFsMCRBleLfLfasdvsRQVSCZgeWDZm7irLgaTgd51IISnQ==",
+          "title": "marketscreener.com"
+        },
+        {
+          "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHDp27HThb6sW2YQXe73HAK2blB7g7btOQwgsfaSDkvi0oYYavp6YAUWQ9Ar5j8f8xhnLsmIS-5apqFQHlLUGumxjBG3d08pApyu_jKwVTF3GWkKSFcvryzwMzt79sex-gUqWhmMelnU7nn",
+          "title": "tiesocal.org"
+        }
+      ],
+      "birthplace_note": "Exact birth city is not public knowledge. Closest verified geographic context: Vijay Kotrappa has an undergraduate degree from the Indian Institute of Technology Bombay and an MS and MBA from UCLA. He has served as an officer for organizations like the Karnataka Cultural Association of Southern California and is involved with The Indus Entrepreneurs (TiE) in Southern California.",
+      "status": "ok",
+      "found": true
+    },
+    "linkedin_public": {
+      "status": "blocked",
+      "url": "https://www.linkedin.com/in/vijay-kotrappa",
+      "http_status": 999
+    },
+    "instagram_public": {
+      "handle": "vijaykotrappa",
+      "profile_url": "https://www.instagram.com/vijaykotrappa/",
+      "discovery": {
+        "status": "ok",
+        "url": "https://www.instagram.com/vijaykotrappa/",
+        "handle": "vijaykotrappa",
+        "query": "Vijay Kotrappa",
+        "scrapecreators_candidates": [
+          {
+            "username": "vijaykotrappa",
+            "full_name": "Vijay Kotrappa"
+          },
+          {
+            "username": "tie_los_angeles",
+            "full_name": "TiE Los Angeles"
+          },
+          {
+            "username": "sureshkkotrappa",
+            "full_name": "Suresh K Kotrappa"
+          },
+          {
+            "username": "rrinstitutions",
+            "full_name": "R R INSTITUTIONS, Bangalore"
+          },
+          {
+            "username": "chittikotrappa",
+            "full_name": "kotrappa chitti"
+          }
+        ],
+        "grounding_urls": [],
+        "attempts": [
+          {
+            "attempt": 1,
+            "query": "\"Vijay Kotrappa\" Instagram",
+            "success": false,
+            "grounding_urls": [
+              {
+                "url": "https://www.google.com/search?q=Vijay+Kotrappa+Instagram&client=app-vertex-grounding&safesearch=active",
+                "title": ""
+              }
+            ],
+            "raw_grounding": [
+              {
+                "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHEq1prRnrYVcsO2SCC86Z6RTmgftrP7bHLnaLcO8chFqiCXuyJp5jl8eZgnWxcj6_wPbdPseH3n09acgDH5SoQXsw-zlvlsLzxCIMPDVy-NOt2AHheRZuiop89C2-6HD7hZm3glat_uI1-YbRBZrMV1H1E5QBBT78Zi8Lw4Dg4DDj_MkFDAh1Uuj0F0SbcKUsC9PEFfKal9RYvlA==",
+                "title": ""
+              }
+            ]
+          },
+          {
+            "attempt": 2,
+            "query": "Vijay Kotrappa Instagram",
+            "success": false,
+            "grounding_urls": [
+              {
+                "url": "https://www.google.com/search?q=Vijay+Kotrappa+Instagram&client=app-vertex-grounding&safesearch=active",
+                "title": ""
+              }
+            ],
+            "raw_grounding": [
+              {
+                "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHJKXQjstZs_a9TupK9tBheVfjCqVRgkF2PMa5d2tbqz9Vx_j3LpZncbw3OtCNil9zlHw0CnltQQVt6j0ujITNxt1TiwuD_XG6rv5qFsyAZApXzvjOvEYPtvvb_NsmK8Zbi6e1JJv2w14cnBC-rMaBGHRR23x0zTEywH0G2HP-AyXYsNlWv1Y81a6TGxIKzWfLyjAtVuQ9j7gx0",
+                "title": ""
+              }
+            ]
+          },
+          {
+            "attempt": 3,
+            "query": "site:instagram.com \"Vijay Kotrappa\"",
+            "success": false,
+            "grounding_urls": [
+              {
+                "url": "https://www.google.com/search?q=+%22Vijay+Kotrappa%22&client=app-vertex-grounding&safesearch=active",
+                "title": ""
+              }
+            ],
+            "raw_grounding": [
+              {
+                "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEsgZF68LrM8jlkKog-iLm2McKkdWMUFzdnDKIxEqSzZpR2QDZ1EcX8GaeaisA4793swIFU-XG8SxrcvROZgEjloPUCQ4trbA6ge_0kolYKk9Bvt-zsctQDpb67XEr34ROLQY6Q6epXWjBZpykIS1JucjPP_ZBA73QMONDQOQt5aK4pbm__5zy1idN16QbDhowaWL61eVGyZQ==",
+                "title": ""
+              }
+            ]
+          },
+          {
+            "attempt": 4,
+            "query": "\"Vijay Kotrappa\" Instagram Guidance Solutions",
+            "success": false,
+            "grounding_urls": [
+              {
+                "url": "https://www.google.com/search?q=Vijay+Kotrappa+Instagram+Guidance+Solutions&client=app-vertex-grounding&safesearch=active",
+                "title": ""
+              }
+            ],
+            "raw_grounding": [
+              {
+                "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEh5aAJE0ZmL-27nWpF2aeM0Xfp0hWVgbgImI6DxNNNqasLO2sm5p5hmZR11oaz9J0jJxZXPAuaTlU3OCcoYhCAsdYXVyHFO1hcdJP1jvhaGMzFnqIFqRjDfAL76NuecSTNKWZHXL_y2YXUn4CNmCAwnCEOw7PgjzkZNph_1PRjewVnNee0AhQ_eE8rTpJR6hzRJ5bIM2ILuHWPZUnnTw2fueTES72RB_OkCTRFLgA=",
+                "title": ""
+              }
+            ]
+          }
+        ],
+        "method": "scrapecreators_name_only"
+      },
+      "profile": {
+        "username": "vijaykotrappa",
+        "full_name": "Vijay Kotrappa",
+        "biography": null,
+        "external_url": null,
+        "followers": null,
+        "following": null,
+        "media_count": null,
+        "is_private": true,
+        "is_verified": false,
+        "category_name": null,
+        "profile_pic_url": "https://scontent-cdg4-2.cdninstagram.com/v/t51.2885-19/461513826_463018996696333_3625626743813616258_n.jpg?stp=dst-jpg_s150x150_tt6&efg=eyJ2ZW5jb2RlX3RhZyI6InByb2ZpbGVfcGljLmRqYW5nby4xMDgwLmMyIn0&_nc_ht=scontent-cdg4-2.cdninstagram.com&_nc_cat=101&_nc_oc=Q6cZ2gGODn2rITKD6YsGmvTVhJ8hvVbg3jLlyQ-dZVIgxY3YGdmHyacohA_nF-elixrArzc&_nc_ohc=_ptcc7PRwlkQ7kNvwF9toTB&_nc_gid=t0gcpVj2983o5DQsdRCr1g&edm=AOQ1c0wBAAAA&ccb=7-5&oh=00_AQBGRDnA9IGgTaFUEY-WBHr1ufqlo1o_WgwfMamydkrKuQ&oe=6A57680F&_nc_sid=8b3546"
+      },
+      "recent_posts": [],
+      "match_confidence": "low",
+      "match_score": 40,
+      "match_notes": [
+        "The social profile's 'full_name' field, 'Vijay Kotrappa', is an exact match for the TARGET's name.",
+        "The social profile's handle, 'vijaykotrappa', also directly corresponds to the TARGET's name."
+      ],
+      "verification_summary": "The Instagram profile shows an exact match for the target's full name and handle. However, due to the profile being private, no additional public information is available to corroborate the match with other identifying details like company, role, or location, limiting the confidence level despite the strong name match.",
+      "status": "no_public_data",
+      "reason": "Instagram account is private"
+    },
+    "facebook_public": {
+      "status": "not_found",
+      "discovery": {
+        "status": "not_found",
+        "url": null,
+        "handle": null,
+        "method": "exhausted",
+        "query": null,
+        "attempts": [
+          {
+            "attempt": 1,
+            "query": "\"Vijay Kotrappa\" Facebook",
+            "success": false,
+            "grounding_urls": [
+              {
+                "url": "https://www.google.com/search?q=Vijay+Kotrappa+Facebook&client=app-vertex-grounding&safesearch=active",
+                "title": ""
+              }
+            ],
+            "raw_grounding": [
+              {
+                "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFztpG0X_Xcvsf2LYk3yE6wd8FTgc_MmN03CQIgVpAJ-FnT_c4mrFVDqFgShSt-hE3hlSr-7IOAfdQJ5x_hSecbcmYd0R_OTmluhZYefvngAa7nkP7_nUkT_fy6x0iNBWDzwZzRIdSySorYqgHH09bCFXe2dlfkmjBNIFTDkH0-bhu-B2hlZaTWbH7laVgYZXwcCskRp7H687-T",
+                "title": ""
+              }
+            ]
+          },
+          {
+            "attempt": 2,
+            "query": "Vijay Kotrappa Facebook",
+            "success": false,
+            "grounding_urls": [
+              {
+                "url": "https://www.google.com/search?q=Vijay+Kotrappa+Facebook&client=app-vertex-grounding&safesearch=active",
+                "title": ""
+              }
+            ],
+            "raw_grounding": [
+              {
+                "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG1tPdGBaHN8q8LD5pd3JdZMkFMTFpBtHQItfmxbiNhY2D3VP_PUeVEOpc5TPwlE4CNYqllGlu4J9p1PO_ZvykgGl2fy7UhN3m8Gezx-pB-b0eSb9_JSbreqOL5IxZkghtOMuvlVMAf98mDPPpSUElB_B9Dgwk9BtkGHY-T-VZ1Oca9mgm-zccWX8BH_ivfGsDQ935as_Ag8gM=",
+                "title": ""
+              }
+            ]
+          },
+          {
+            "attempt": 3,
+            "query": "site:facebook.com \"Vijay Kotrappa\"",
+            "success": false,
+            "grounding_urls": [
+              {
+                "url": "https://www.google.com/search?q=+%22Vijay+Kotrappa%22&client=app-vertex-grounding&safesearch=active",
+                "title": ""
+              }
+            ],
+            "raw_grounding": [
+              {
+                "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF9dX8eMUEhY4psVOPgJtRnZh2d99PmIVMCgI9Hv5qKLty_KBL3XKfQ5LiAsESjs3UyIwaE_ll9e6oMcOTjfdLS-KVn5nizMFb4Ex6DbwRlXOVAU9zRzvBzlCfDhlnvhs6dvwFiPs1fqwIKWWKNphzpNEue-qI7M5dlK6MgWgYhApqAsUw7QVIDMnt6IQKdldQVBn05FdDX3Q==",
+                "title": ""
+              }
+            ]
+          },
+          {
+            "attempt": 4,
+            "query": "\"Vijay Kotrappa\" Facebook Guidance Solutions",
+            "success": false,
+            "grounding_urls": [
+              {
+                "url": "https://www.google.com/search?q=+%22Vijay+Kotrappa%22+%22Guidance+Solutions%22&client=app-vertex-grounding&safesearch=active",
+                "title": ""
+              }
+            ],
+            "raw_grounding": [
+              {
+                "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH7iTk6-GrSebJTIJ83_nIJEuQbCJgRJE1ZpbN3-r36bKK-_1kAZVheVunbd9lXFipdF1jdCdBflIMAPxeIi-F1zMa6tpN5BWserzZ6zrgU5fIVytKxnJuKqmkhzmC7wkw3iSr_N3I6MTw5Zoz-kR895OTxHJ8OyrT6rU7byJPbH8CzoesMLg4KLHOT0p4IBHvv-dSEM7H_m3Fo6t4Rao0GpZQgw4gEJoaC9TzyBBwX1gs=",
+                "title": ""
+              }
+            ]
+          }
+        ],
+        "grounding_urls": [],
+        "reason": "no facebook profile URL after 4 Google attempts + ScrapeCreators name search"
+      },
+      "reason": "no facebook profile URL after 4 Google attempts + ScrapeCreators name search"
+    },
+    "twitter_public": {
+      "status": "not_found",
+      "discovery": {
+        "status": "not_found",
+        "url": null,
+        "handle": null,
+        "method": "exhausted",
+        "query": null,
+        "attempts": [
+          {
+            "attempt": 1,
+            "query": "\"Vijay Kotrappa\" Twitter",
+            "success": false,
+            "grounding_urls": [
+              {
+                "url": "https://www.google.com/search?q=%22Vijay+Kotrappa%22+Twitter&client=app-vertex-grounding&safesearch=active",
+                "title": ""
+              }
+            ],
+            "raw_grounding": [
+              {
+                "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFl8RnovxsDHa8QZ24W5Zf_KUkhsgAfihmT7Bg94jgteZ2UD7l4E6h0jF28k1LXqINDkkw_eDDzThBsBTbB0-XgZ3lnQxKCZYv2sP6shlre-XtHjpFal2p40M13EHN9CCIJkrcW71OEH_VLt4fc7cHSjrkyNlEfMhWmYIxeVwJotqcphP7MI5SHHsQv5sIyvmQ_vrXknOyejlUcy2nMKJo=",
+                "title": ""
+              }
+            ]
+          },
+          {
+            "attempt": 2,
+            "query": "Vijay Kotrappa Twitter",
+            "success": false,
+            "grounding_urls": [
+              {
+                "url": "https://www.google.com/search?q=Vijay+Kotrappa+Twitter&client=app-vertex-grounding&safesearch=active",
+                "title": ""
+              }
+            ],
+            "raw_grounding": [
+              {
+                "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFS_NaqL3r-Q5BIB5Zsc3bD1z5nXiEIGqLDi7occM1Rx3Q9bS6Xzkr0cvXAw9RktEGLC4CpkT3SQgQF0ykbO6z3wOxneqzU9PiWWwB2uheAqwNFBaCPPad4MlbwX3HFnoU8QyABJB8o2YP7FfXNye0qj0fin2qygTjdYGfGZGxoU0kLW635PSnzWwsL-MdQi9mTn9OSpnPeu-Y=",
+                "title": ""
+              }
+            ]
+          },
+          {
+            "attempt": 3,
+            "query": "site:twitter.com \"Vijay Kotrappa\"",
+            "success": false,
+            "grounding_urls": [
+              {
+                "url": "https://www.google.com/search?q=+%22Vijay+Kotrappa%22&client=app-vertex-grounding&safesearch=active",
+                "title": ""
+              }
+            ],
+            "raw_grounding": [
+              {
+                "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEcyK_9PRV_d1SBc6uWLKNWy3an9SpWYKAJ_pp0MM69oaefiNGoL3jdzHEnZREU3u5ndb1o-B1WiCZRHvV6n51CPWHYyUm20CdLPSv0NuqbW596eqR00oQnNWz9vv7hRU_S1UnB_nlnlKyfm5r0IPeqQiFIUKzjLQOGmEmWLaD3ZDfkGvLAb85xQmmbjml8JppFtpTPlXAyAw==",
+                "title": ""
+              }
+            ]
+          },
+          {
+            "attempt": 4,
+            "query": "\"Vijay Kotrappa\" Twitter Guidance Solutions",
+            "success": false,
+            "grounding_urls": [
+              {
+                "url": "https://www.google.com/search?q=Vijay+Kotrappa+Twitter+Guidance+Solutions&client=app-vertex-grounding&safesearch=active",
+                "title": ""
+              }
+            ],
+            "raw_grounding": [
+              {
+                "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFD-PlEWGWJ6Zwl2_evg5c55YrhZH0NQAdUt_V5xSVZfRA7d7pN0ul6gFud0aXhdJoFwOvk7SDbIfXjiSf3v7mCSJVu_bE9xHkj4UHmvlAZ4mMm9iYhaRfpJIuqsjm5MIsSgfv6L9l4fQryfyZAoPgAs46jnZLIYc6YsRSA_c_TSdywstgJVLAPsSw3w5O9dENylCJxA-gbsfDbrJXMfIXr3BI2a8r0yPGowo8=",
+                "title": ""
+              }
+            ]
+          }
+        ],
+        "grounding_urls": [],
+        "reason": "no twitter profile URL after 4 Google attempts + ScrapeCreators name search"
+      },
+      "reason": "no twitter profile URL after 4 Google attempts + ScrapeCreators name search"
+    }
+  },
+  "latest_source_status": {
+    "github": "not_found",
+    "patents": "skipped",
+    "gemini_search": "ok",
+    "exa_search": "ok",
+    "personal_info": "ok",
+    "linkedin_public": "blocked",
+    "instagram_public": "no_public_data",
+    "facebook_public": "not_found",
+    "twitter_public": "not_found"
+  },
+  "source_fetched_at": {
+    "github": "2026-07-10T23:24:14.346625+00:00",
+    "gemini_search": "2026-07-10T23:24:14.346625+00:00",
+    "exa_search": "2026-07-10T23:24:14.346625+00:00",
+    "personal_info": "2026-07-10T23:24:14.346625+00:00",
+    "linkedin_public": "2026-07-10T23:24:14.346625+00:00",
+    "instagram_public": "2026-07-10T23:24:14.346625+00:00",
+    "facebook_public": "2026-07-10T23:24:14.346625+00:00",
+    "twitter_public": "2026-07-10T23:24:14.346625+00:00"
+  },
+  "latest_summary": {
+    "status": "ok",
+    "summary": "Vijay Kotrappa is an experienced technology professional, angel investor, and prominent leader within The Indus Entrepreneurs (TiE). He co-founded Guidance Solutions, Inc. in 1993, a website development company, and has held roles as Unix Systems Engineer at Sun Microsystems and Vice President at USourceIT. As an active angel investor, he focuses on seed and pre-Series A investments in technology and healthcare, identifying opportunities with sustainability in niche markets. He has served as a Trustee/Director/Board Member for TiE since 2018, was President of TiE SoCal in 2013, and is currently on the Investment Committee for multiple TiE-affiliated funds. Kotrappa holds an undergraduate degree from the Indian Institute of Technology Bombay and graduate and MBA degrees from the University of California, Los Angeles, and is based in Southern California.",
+    "career_history": [
+      "Unix Systems Engineer, Sun Microsystems, Inc.",
+      "Founder, Guidance Solutions, Inc. (1993-2008, remained minority shareholder)",
+      "President, Association of Internet Professionals",
+      "Vice President-Assess OndemandTM, USourceIT, Inc.",
+      "President, TiE SoCal (2013)",
+      "Trustee, TiE Global (2019-2020)",
+      "Trustee/Director/Board Member, The Indus Entrepreneurs (since 2018)",
+      "Board Member, TiE Los Angeles (SoCal)",
+      "Charter Member, The Indus Entrepreneurs (TiE)",
+      "Treasurer, Karuna America",
+      "Officer, Karnataka Cultural Association of Southern California",
+      "Manager and Investment Committee, TiE Socal Angel Fund, Women Entrepreneurs Fund, Amerikan Founders Fund, 34Nreef1 Real Estate Fund (Jan 2019 - Present) in Los Angeles"
+    ],
+    "interests": [
+      "Angel investing (seed and pre-Series A)",
+      "Technology and healthcare investments",
+      "E-commerce and consumer branded internet systems",
+      "Enterprise integration",
+      "Fostering entrepreneurship",
+      "Networking"
+    ],
+    "notable_points": [
+      "Co-founder of Guidance Solutions, Inc., a website development company, in 1993.",
+      "Actively involved as an angel investor, focusing on seed and pre-Series A investments in technology and healthcare.",
+      "Holds a significant leadership role as Trustee/Director/Board Member at The Indus Entrepreneurs (TiE) since 2018, and previously served as President of TiE SoCal in 2013.",
+      "Possesses deep technology experience in e-commerce, consumer branded internet systems, and enterprise integration.",
+      "Member of the Investment Committee for several funds including TiE Socal Angel Fund, Women Entrepreneurs Fund, Amerikan Founders Fund, and 34Nreef1 Real Estate Fund.",
+      "Emphasizes investing in companies with sustainability in niche areas and values founders who are strong salespeople."
+    ],
+    "notable_affiliations": [
+      "The Indus Entrepreneurs (TiE)",
+      "Guidance Solutions, Inc.",
+      "Sun Microsystems, Inc.",
+      "Association of Internet Professionals",
+      "USourceIT, Inc.",
+      "Karuna America",
+      "Karnataka Cultural Association of Southern California",
+      "TiE SoCal Angel Fund",
+      "Women Entrepreneurs Fund",
+      "Amerikan Founders Fund",
+      "34Nreef1 Real Estate Fund"
+    ],
+    "research_collaborators": [
+      {
+        "name": "Joe Tang",
+        "context": "Co-founder of Guidance Solutions, Inc."
+      },
+      {
+        "name": "Pillan Thirumalaisamy",
+        "context": "Co-founder of Guidance Solutions, Inc."
+      }
+    ],
+    "awards_and_recognitions": [],
+    "identity_confidence": "high",
+    "identity_notes": "The LinkedIn profile URL was successfully found by exa_search, providing current role information, despite gemini_search indicating a null LinkedIn link. All other career details and mentions corroborate across sources.",
+    "conversation_starters": [
+      "I'm interested in your journey from co-founding Guidance Solutions, Inc. to becoming an angel investor. What was the most significant pivot for you?",
+      "Your involvement with TiE has been extensive. Could you share some highlights from your time as President of TiE SoCal or as a Trustee on the Global Board?",
+      "You've expressed a preference for investing in companies with sustainability in niche areas. Could you elaborate on what defines a 'sustainable niche' for you?",
+      "Having worked as a Unix Systems Engineer at Sun Microsystems, how do you see the evolution of core technology influencing today's startup landscape?",
+      "What trends are you most excited about in the technology and healthcare sectors for seed and pre-Series A investments right now?",
+      "I saw you spoke at TiECon Southwest 2013 on fostering entrepreneurship. What advice do you find yourself giving most often to aspiring founders today?"
+    ],
+    "deep_dive_questions": [
+      "Given your experience with e-commerce and consumer branded internet systems, how do you evaluate the competitive landscape for new direct-to-consumer brands seeking seed funding?",
+      "As a member of multiple investment committees, what frameworks do you use to assess a founder's 'salesperson mentality' and its impact on a startup's early-stage success?",
+      "With your deep involvement in TiE, how do you envision the organization's role evolving to support entrepreneurs in emerging markets versus established tech hubs like Southern California?",
+      "What specific metrics or qualitative indicators do you prioritize when identifying seed/pre-Series A opportunities that demonstrate long-term sustainability beyond initial market hype?",
+      "How has the due diligence process for angel investing changed since you started in 2008, particularly concerning technology and healthcare startups?",
+      "What are the biggest challenges you see for early-stage companies raising capital in today's economic climate, and how might founders best address them?"
+    ],
+    "public_presence": {
+      "posts_about": [
+        "Investment philosophy and involvement with TiE Angel Fund, focusing on sustainability in niche areas and strong founders.",
+        "Fostering entrepreneurship and offering networking tips at TiECon Southwest events.",
+        "His role as co-founder of Guidance Solutions, Inc.",
+        "Participation in TiEcon Southwest events, including 2021 as an attendee/speaker."
+      ],
+      "recent_posts_or_writing": [
+        {
+          "topic": "Investment philosophy, technology background, and involvement with TiE",
+          "source": "YouTube (Startup Steroid)",
+          "snippet": "In a '5 in 5 interview for Startup Steroid' published on January 6, 2021, Vijay Kotrappa discusses his background in technology, e-commerce, and enterprise integration. He shares his investment philosophy, highlighting his focus on seed and pre-Series A stage companies with sustainability in niche areas, particularly within technology and healthcare. He also mentions his preference for investing in companies led by strong sales-oriented founders and his association with The Indus Entrepreneurs (TiE) as a source of connections and deals."
+        },
+        {
+          "topic": "Fostering entrepreneurship and networking tips",
+          "source": "India Journal (TiECon Southwest 2013)",
+          "snippet": "As President of TiE SoCal, Vijay Kotrappa delivered a speech at TiECon Southwest 2013, outlining TiE's goal of fostering entrepreneurship and offering three tips for attendees: networking, continuous learning, and not hesitating to ask 'shamelessly'."
+        }
+      ],
+      "liked_or_engaged_with": [],
+      "availability_note": "Public LinkedIn engagement feeds are login-gated and unavailable. The identified Instagram profile is private, and no public Facebook or Twitter profiles were found."
+    },
+    "senior_connections": [
+      {
+        "name": "Jason Meugniot",
+        "title": "Owner and CEO",
+        "context": "Purchased Guidance Solutions, Inc. from its founders in 2008",
+        "seniority": "C-level"
+      },
+      {
+        "name": "Jon Provisor",
+        "title": "Owner and CIO",
+        "context": "Purchased Guidance Solutions, Inc. from its founders in 2008",
+        "seniority": "C-level"
+      },
+      {
+        "name": "Lisa Brewer",
+        "title": "COO",
+        "context": "COO of Guidance Solutions, Inc.",
+        "seniority": "C-level"
+      },
+      {
+        "name": "Jon Larsen",
+        "title": "VP, Information Systems and Managed Services",
+        "context": "VP, Information Systems and Managed Services at Guidance Solutions, Inc.",
+        "seniority": "VP"
+      },
+      {
+        "name": "Dr. H. Sudarshan",
+        "title": "Honorary Chairman",
+        "context": "Honorary Chairman at Karuna America, where Vijay Kotrappa is Treasurer.",
+        "seniority": "Board"
+      },
+      {
+        "name": "Dr. G.K. Surya Prakash",
+        "title": "President",
+        "context": "President at Karuna America, where Vijay Kotrappa is Treasurer.",
+        "seniority": "C-level"
+      },
+      {
+        "name": "Leela Mudiyam",
+        "title": "Director",
+        "context": "Director at Karuna America, where Vijay Kotrappa is Treasurer.",
+        "seniority": "Director"
+      },
+      {
+        "name": "Venkat Tadanki",
+        "title": "Founding Board Member, TiE SoCal Angel Fund",
+        "context": "Founding Board member of TiE SoCal Angel Fund, associated with TiE SoCal where Vijay Kotrappa is a Trustee and past President.",
+        "seniority": "Board"
+      },
+      {
+        "name": "Yash Shah",
+        "title": "Chair, Global Board of Trustees",
+        "context": "Chair of the TiE Global Board of Trustees.",
+        "seniority": "Board"
+      },
+      {
+        "name": "Murali Bukkapatnam",
+        "title": "Chair, Global Board of Trustees",
+        "context": "Elected Chair of the TiE Global Board of Trustees in 2025.",
+        "seniority": "Board"
+      },
+      {
+        "name": "Anita Manwani",
+        "title": "Vice Chair, Global Board of Trustees",
+        "context": "Named Vice Chair of the TiE Global Board of Trustees in 2025.",
+        "seniority": "Board"
+      }
+    ],
+    "personal_info": {
+      "born_or_hometown": null,
+      "raised_in": null,
+      "current_location": "Southern California, with strong connections to the Los Angeles area.",
+      "lived_in": [
+        "Southern California",
+        "India",
+        "Los Angeles, CA, USA"
+      ],
+      "hobbies": [],
+      "sports_interests": [],
+      "weekend_preferences": [],
+      "family_background": [],
+      "personal_notes": [
+        "Exact birth city is not public knowledge. Closest verified geographic context: Vijay Kotrappa has an undergraduate degree from the Indian Institute of Technology Bombay and an MS and MBA from UCLA. He has served as an officer for organizations like the Karnataka Cultural Association of Southern California and is involved with The Indus Entrepreneurs (TiE) in Southern California."
+      ],
+      "birthplace_note": "Exact birth city is not public knowledge. Closest verified geographic context: Vijay Kotrappa has an undergraduate degree from the Indian Institute of Technology Bombay and an MS and MBA from UCLA. He has served as an officer for organizations like the Karnataka Cultural Association of Southern California and is involved with The Indus Entrepreneurs (TiE) in Southern California.",
+      "evidence": [
+        {
+          "fact": "Vijay Kotrappa has an undergraduate degree from the Indian Institute of Technology Bombay.",
+          "source_hint": "MarketScreener India"
+        },
+        {
+          "fact": "Vijay Kotrappa has an MS and MBA from UCLA.",
+          "source_hint": "Karuna America"
+        },
+        {
+          "fact": "Vijay Kotrappa has served as an officer of the Karnataka Cultural Association of Southern California.",
+          "source_hint": "Karuna America"
+        },
+        {
+          "fact": "Vijay Kotrappa is a Trustee at The Indus Entrepreneurs since 2018.",
+          "source_hint": "MarketScreener India"
+        },
+        {
+          "fact": "Vijay Kotrappa is associated with TiE Los Angeles (SoCal).",
+          "source_hint": "TiE Los Angeles (SoCal)"
+        },
+        {
+          "fact": "He has a graduate degree and an MBA from the University of California, Los Angeles.",
+          "source_hint": "MarketScreener India, Karuna America"
+        },
+        {
+          "fact": "He has served as an officer of non-profit organizations such as The Indus Entrepreneurs and Karnataka Cultural Association of Southern California.",
+          "source_hint": "Karuna America"
+        },
+        {
+          "fact": "He is associated with TiE Los Angeles (SoCal).",
+          "source_hint": "TiE Los Angeles (SoCal)"
+        },
+        {
+          "fact": "Karuna America, where he is a Treasurer, has an address in Pomona, CA, which is in Southern California.",
+          "source_hint": "Karuna America"
+        },
+        {
+          "fact": "Vijay Kotrappa founded Guidance Solutions, Inc., which grew to over 200 employees in Los Angeles.",
+          "source_hint": "TiE SoCal Newsletter / TiE Los Angeles (SoCal) website"
+        },
+        {
+          "fact": "Guidance Solutions, Inc. was founded in Hawthorne, California, and its headquarters are in Marina del Rey, CA.",
+          "source_hint": "Wikipedia - Guidance Solutions"
+        },
+        {
+          "fact": "Vijay Kotrappa served as an officer for non-profit organizations such as The Indus Entrepreneurs (TiE) and Karnataka Cultural Association of Southern California.",
+          "source_hint": "Karuna America website"
+        },
+        {
+          "fact": "He led TiE SoCal as President in 2013.",
+          "source_hint": "TiE SoCal Newsletter / TiE Los Angeles (SoCal) website"
+        },
+        {
+          "fact": "His education includes an MS and MBA from UCLA (University of California, Los Angeles).",
+          "source_hint": "Karuna America website / MarketScreener India"
+        },
+        {
+          "fact": "In a 2021 interview, he referred to the 'TiE Angel Fund here in SoCal'.",
+          "source_hint": "YouTube - Vijay Kotrappa: 5 in 5 interview for Startup Steroid"
+        },
+        {
+          "fact": "Vijay Kotrappa is the founder of Guidance Solutions, Inc. (1993).",
+          "source_hint": "MarketScreener India"
+        },
+        {
+          "fact": "Mr. Kotrappa is a Trustee at The Indus Entrepreneurs since 2018.",
+          "source_hint": "MarketScreener India"
+        },
+        {
+          "fact": "He has a deep technology experience in terms of e-commerce and consumer branded internet systems.",
+          "source_hint": "5 in 5 interview for Startup Steroid"
+        },
+        {
+          "fact": "His education includes a graduate degree and an MBA from the University of California, Los Angeles.",
+          "source_hint": "MarketScreener India"
+        },
+        {
+          "fact": "He also has an undergraduate degree from the Indian Institute of Technology Bombay.",
+          "source_hint": "MarketScreener India"
+        },
+        {
+          "fact": "He is associated with TiE in SoCal (Southern California).",
+          "source_hint": "TiE Los Angeles (SoCal)"
+        },
+        {
+          "fact": "He has an undergraduate degree from the Indian Institute of Technology Bombay.",
+          "source_hint": "MarketScreener India"
+        },
+        {
+          "fact": "He has served as an officer of several non-profit organizations such as The Indus Entrepreneurs and Karnataka Cultural Association of Southern California.",
+          "source_hint": "Karuna America"
+        },
+        {
+          "fact": "He is a Computer Engineer and has successfully formed and led several businesses in information technology.",
+          "source_hint": "Karuna America"
+        }
+      ]
+    }
+  }
+}
