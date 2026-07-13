@@ -1,12 +1,7 @@
-"""Common-ground / overlap layer between YOU (user_profile) and THEM (research).
+"""Internal overlap engine → public conversation ideas.
 
-Phase 2: drives conversation_starters, deep_dive_questions, and related topics
-from shared context — not generic person-only prompts.
-
-Phase 3 hooks (not fully built yet):
-- token tiers: basic = research only (1), detailed = research + overlap (3)
-- profile_refinement suggestions so YOUR profile improves over time
-- CRM-ready contact + interaction logging via storage
+Overlap matching stays server-side. What users see is *what to talk about*:
+topics, openers, and deep questions — never scores or "you vs them" plumbing.
 """
 
 from __future__ import annotations
@@ -24,71 +19,74 @@ from user_profile import is_usable, load_user_profile, profile_for_overlap
 MODEL = os.environ.get("GEMINI_MODEL") or "gemini-2.5-flash"
 MAX_OUTPUT_TOKENS = 6144
 
-# Token ledger for the upcoming MVP (charged by CLI / API later).
 TOKEN_COST_BASIC = 1
 TOKEN_COST_DETAILED = 3
 
 SYSTEM_PROMPT = """
-You are an expert relationship strategist for high-trust professional conversations.
+You are an expert conversation designer for high-trust professional meetings.
 
-You receive two JSON blobs:
-1) YOU — the searcher's living profile (who is about to meet / message someone)
+You receive two JSON blobs used ONLY as private context:
+1) YOU — the searcher's profile
 2) THEM — a researched public briefing about the other person
 
-Your job is to find REAL common ground and turn it into conversation that feels
-personal and earned — never generic networking fluff.
+Internally, find real shared or closely related points. Then translate those into
+interesting, engaging things to talk about. The end user should never see
+"overlap analysis" — they should see conversation fuel.
 
 ### HARD RULES (zero hallucination)
-- Only claim overlap when BOTH sides have supporting evidence in the JSON.
-- If evidence is weak or one-sided, label strength "weak" or omit that point.
+- Only claim a shared bridge when BOTH sides have supporting evidence in the JSON.
 - Never invent shared schools, cities, employers, hobbies, or mutual contacts.
-- Prefer specific, nameable overlaps (same org, same city era, same sector thesis)
-  over vague vibes ("both like technology").
-- Respect YOU.avoid_topics: do not suggest openers in those areas.
-- Icebreakers and deep dives MUST be rooted in listed common_grounds or
-  related_topics. Do not fall back to THEM-only career trivia unless there is
-  at least a thin bridge from YOU (e.g. YOU invest in healthcare AND THEM works
-  in healthtech → bridge is investment thesis, not "tell me about your job").
+- Prefer specific, nameable bridges over vague vibes ("both like technology").
+- Respect YOU.avoid_topics.
+- Openers and deep questions MUST be rooted in the talk topics you list.
+- Do not write openers that announce "we have so much in common" or expose the
+  matching machinery. Write natural things YOU could actually say.
+
+### SPARSE THEM (students / low public footprint)
+If THEM.profile_density is "sparse" OR THEM.user_supplied_facts is the main signal:
+- Still produce useful conversation fuel from whatever is verified.
+- Prefer curiosity about their known school, role, project, or city — not fake overlap.
+- Bridges may be one-sided: YOU's experience as a natural entry into THEIR thin context
+  (e.g. YOU mentored at that university) ONLY when YOU's side is evidenced.
+- Set needs_more_info to concrete asks (LinkedIn URL, Instagram, major, graduation year).
+- Keep talk_about shorter (2–4) rather than inventing filler.
 
 ### WHAT TO PRODUCE
-1) common_grounds — concrete shared or closely related points. Each item:
-   - point: short label
-   - you_side / them_side: the supporting facts
-   - strength: strong | moderate | weak
-   - why_it_matters: one sentence on conversational value
-2) related_topics_to_discuss — adjacent themes worth exploring (not strict
-   overlaps but natural extensions of the common ground)
-3) conversation_starters — 4–6 light, rapport-building openers written as
-   something YOU could actually say. First-person or natural spoken tone.
-   Anchor each in a common_ground (mention the bridge implicitly).
-4) deep_dive_questions — 4–6 substantive questions that use the overlap as
-   the entry point, then go deeper into THEIR expertise / writing / company.
-5) overlap_summary — 2–4 sentences: overall fit and best angle for YOU.
-6) overlap_score — integer 0–100 (calibrated; sparse mutual facts → low).
-7) your_profile_gaps — what YOU should add to your profile to improve future
-   overlap detection with people like THEM (actionable, specific). This feeds
-   Phase 3 profile refinement.
-8) outreach_angle — one short suggested LinkedIn note / opener premise
-   (no fake familiarity). Useful for Phase 3 connection requests.
+1) _internal_bridges — private reasoning only (used for quality control). Each:
+   - point, you_side, them_side, strength (strong|moderate|weak)
+2) talk_about — USER-FACING topics (2–6). Each:
+   - topic: short engaging label (not "Overlap: X")
+   - hook: 1–2 sentences on why this is interesting to discuss with THEM
+3) related_topics — adjacent themes worth exploring
+4) openers — 4–6 light, spoken-tone icebreakers YOU could say
+5) deep_questions — 4–6 substantive questions (or fewer if THEM is sparse)
+6) conversation_brief — 2–3 sentences: best overall angle for the meeting
+7) message_angle — one short LinkedIn / intro note premise
+8) your_profile_gaps — what YOU should add to improve future conversation ideas
+9) needs_more_info — list of specific facts/handles that would unlock better topics
+10) _overlap_score — integer 0–100, INTERNAL ONLY
+11) _profile_density — "rich" | "ok" | "sparse"
 
 ### OUTPUT
 Respond ONLY with valid JSON (no markdown fences):
 
 {
-  "overlap_score": number,
-  "overlap_summary": string,
-  "common_grounds": [{
+  "_overlap_score": number,
+  "_profile_density": "rich" | "ok" | "sparse",
+  "_internal_bridges": [{
     "point": string,
     "you_side": string,
     "them_side": string,
-    "strength": "strong" | "moderate" | "weak",
-    "why_it_matters": string
+    "strength": "strong" | "moderate" | "weak"
   }],
-  "related_topics_to_discuss": [string],
-  "conversation_starters": [string],
-  "deep_dive_questions": [string],
+  "conversation_brief": string,
+  "talk_about": [{"topic": string, "hook": string}],
+  "related_topics": [string],
+  "openers": [string],
+  "deep_questions": [string],
+  "message_angle": string,
   "your_profile_gaps": [string],
-  "outreach_angle": string
+  "needs_more_info": [string]
 }
 """.strip()
 
@@ -99,8 +97,10 @@ def analyze_common_ground(
     them_name: Optional[str] = None,
     user_profile: Optional[dict[str, Any]] = None,
     them_sources: Optional[dict[str, Any]] = None,
+    them_hints: Optional[dict[str, Any]] = None,
+    verbose: bool = False,
 ) -> dict[str, Any]:
-    """Compare YOU vs THEM and return overlap + overlap-based questions."""
+    """Run the internal overlap engine; returns full (including private) fields."""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         return {"status": "skipped", "reason": "GEMINI_API_KEY not set"}
@@ -113,17 +113,29 @@ def analyze_common_ground(
     if not is_usable(profile):
         return {
             "status": "skipped",
-            "reason": "user_profile.json needs more detail (name + a few fields)",
+            "reason": "user profile needs more detail (name + a few fields)",
         }
 
+    from sparse_profile import briefing_density
+
     you = profile_for_overlap(profile)
-    them = _them_brief(them_summary, them_sources, them_name=them_name)
+    them = _them_brief(them_summary, them_sources, them_name=them_name, them_hints=them_hints)
+    density = briefing_density(them_summary)
+    them["profile_density"] = density
+
+    if verbose:
+        print("  [overlap] comparing YOU vs THEM (internal step)…")
+        print(f"  [overlap] YOU fields: {', '.join(sorted(you.keys()))}")
+        print(f"  [overlap] THEM density: {density}")
+        if them_hints:
+            print(f"  [overlap] extra facts about THEM: {list(them_hints.keys())}")
+        print("  [overlap] calling Gemini for talk topics / openers…")
 
     client = genai.Client(api_key=api_key)
     contents = (
-        "YOU (searcher profile):\n"
+        "YOU (searcher profile — private context):\n"
         f"{json.dumps(you, indent=2)}\n\n"
-        "THEM (researched person briefing):\n"
+        "THEM (researched person briefing — private context):\n"
         f"{json.dumps(them, indent=2)}"
     )
     config = types.GenerateContentConfig(
@@ -155,37 +167,137 @@ def analyze_common_ground(
             "raw_text": text,
         }
 
+    normalized = _normalize_engine_output(parsed)
+    normalized.setdefault("_profile_density", density)
+    if verbose:
+        bridges = normalized.get("_internal_bridges") or []
+        print(f"  [overlap] internal bridges found: {len(bridges)}")
+        for b in bridges[:5]:
+            if isinstance(b, dict):
+                print(f"      • {b.get('point')} [{b.get('strength')}]")
+        print(f"  [overlap] talk topics: {len(normalized.get('talk_about') or [])}")
+        print(f"  [overlap] openers: {len(normalized.get('openers') or [])}")
+        if normalized.get("needs_more_info"):
+            print("  [overlap] needs more info:")
+            for item in normalized["needs_more_info"][:5]:
+                print(f"      • {item}")
+
     return {
         "status": "ok",
         "usage_tier": "detailed",
         "tokens_charged": TOKEN_COST_DETAILED,
         "you_name": you.get("name"),
         "them_name": them.get("name"),
-        **parsed,
+        **normalized,
+    }
+
+
+def public_conversation(engine: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """Strip internal overlap fields; shape the user-facing conversation block."""
+    if not isinstance(engine, dict):
+        return {"status": "missing"}
+    if engine.get("status") and engine.get("status") != "ok":
+        return {
+            "status": engine.get("status"),
+            "reason": engine.get("reason") or engine.get("error"),
+        }
+
+    # Support both new engine shape and older stored common_ground blobs.
+    talk_about = engine.get("talk_about")
+    if not talk_about:
+        talk_about = []
+        for g in engine.get("common_grounds") or []:
+            if not isinstance(g, dict):
+                continue
+            talk_about.append(
+                {
+                    "topic": g.get("point") or "",
+                    "hook": g.get("why_it_matters") or "",
+                }
+            )
+
+    openers = engine.get("openers") or engine.get("conversation_starters") or []
+    deep = engine.get("deep_questions") or engine.get("deep_dive_questions") or []
+    related = engine.get("related_topics") or engine.get("related_topics_to_discuss") or []
+    brief = engine.get("conversation_brief") or engine.get("overlap_summary") or ""
+    angle = engine.get("message_angle") or engine.get("outreach_angle") or ""
+
+    return {
+        "status": "ok",
+        "conversation_brief": brief,
+        "talk_about": talk_about,
+        "related_topics": related,
+        "openers": openers,
+        "deep_questions": deep,
+        "message_angle": angle,
+        "needs_more_info": engine.get("needs_more_info") or [],
+        "profile_density": engine.get("_profile_density"),
     }
 
 
 def apply_overlap_to_summary(summary: dict[str, Any], overlap: dict[str, Any]) -> dict[str, Any]:
-    """Replace icebreakers / deep dives with overlap-rooted versions when available."""
+    """Attach user-facing conversation ideas; keep full engine result for storage."""
     if overlap.get("status") != "ok":
         return summary
     updated = dict(summary)
-    if overlap.get("conversation_starters"):
-        updated["conversation_starters"] = overlap["conversation_starters"]
-    if overlap.get("deep_dive_questions"):
-        updated["deep_dive_questions"] = overlap["deep_dive_questions"]
-    updated["common_ground"] = {
-        "overlap_score": overlap.get("overlap_score"),
-        "overlap_summary": overlap.get("overlap_summary"),
-        "common_grounds": overlap.get("common_grounds") or [],
-        "related_topics_to_discuss": overlap.get("related_topics_to_discuss") or [],
+    conv = public_conversation(overlap)
+    updated["conversation_starters"] = conv.get("openers") or []
+    updated["deep_dive_questions"] = conv.get("deep_questions") or []
+    updated["conversation"] = conv
+    # Keep a compact internal snapshot on the summary for debugging / refinement.
+    updated["_conversation_engine"] = {
+        "_overlap_score": overlap.get("_overlap_score") or overlap.get("overlap_score"),
+        "_internal_bridges": overlap.get("_internal_bridges")
+        or overlap.get("common_grounds")
+        or [],
         "your_profile_gaps": overlap.get("your_profile_gaps") or [],
-        "outreach_angle": overlap.get("outreach_angle"),
-        "you_name": overlap.get("you_name"),
-        "usage_tier": overlap.get("usage_tier"),
-        "tokens_charged": overlap.get("tokens_charged"),
     }
     return updated
+
+
+def _normalize_engine_output(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Accept new schema; also map legacy field names if the model slips."""
+    score = parsed.get("_overlap_score")
+    if score is None:
+        score = parsed.get("overlap_score")
+
+    bridges = parsed.get("_internal_bridges")
+    if bridges is None:
+        bridges = parsed.get("common_grounds") or []
+
+    talk = parsed.get("talk_about")
+    if not talk and parsed.get("common_grounds"):
+        talk = [
+            {"topic": g.get("point", ""), "hook": g.get("why_it_matters", "")}
+            for g in parsed["common_grounds"]
+            if isinstance(g, dict)
+        ]
+
+    return {
+        "_overlap_score": score,
+        "_internal_bridges": bridges or [],
+        "conversation_brief": parsed.get("conversation_brief") or parsed.get("overlap_summary") or "",
+        "talk_about": talk or [],
+        "related_topics": parsed.get("related_topics")
+        or parsed.get("related_topics_to_discuss")
+        or [],
+        "openers": parsed.get("openers") or parsed.get("conversation_starters") or [],
+        "deep_questions": parsed.get("deep_questions") or parsed.get("deep_dive_questions") or [],
+        "message_angle": parsed.get("message_angle") or parsed.get("outreach_angle") or "",
+        "your_profile_gaps": parsed.get("your_profile_gaps") or [],
+        "needs_more_info": parsed.get("needs_more_info") or [],
+        "_profile_density": parsed.get("_profile_density"),
+        # Legacy aliases so older CLI/storage paths keep working during transition.
+        "overlap_score": score,
+        "overlap_summary": parsed.get("conversation_brief") or parsed.get("overlap_summary") or "",
+        "common_grounds": bridges or [],
+        "related_topics_to_discuss": parsed.get("related_topics")
+        or parsed.get("related_topics_to_discuss")
+        or [],
+        "conversation_starters": parsed.get("openers") or parsed.get("conversation_starters") or [],
+        "deep_dive_questions": parsed.get("deep_questions") or parsed.get("deep_dive_questions") or [],
+        "outreach_angle": parsed.get("message_angle") or parsed.get("outreach_angle") or "",
+    }
 
 
 def _them_brief(
@@ -193,8 +305,8 @@ def _them_brief(
     sources: Optional[dict[str, Any]],
     *,
     them_name: Optional[str] = None,
+    them_hints: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    """Compact THEM payload so the overlap call stays focused."""
     personal = summary.get("personal_info") if isinstance(summary.get("personal_info"), dict) else {}
     brief: dict[str, Any] = {
         "name": them_name,
@@ -205,6 +317,7 @@ def _them_brief(
         "notable_affiliations": summary.get("notable_affiliations") or [],
         "awards_and_recognitions": summary.get("awards_and_recognitions") or [],
         "public_presence": summary.get("public_presence"),
+        "identity_confidence": summary.get("identity_confidence"),
         "personal_info": {
             k: personal.get(k)
             for k in (
@@ -229,4 +342,9 @@ def _them_brief(
             brief["current_role"] = gemini["current_role"]
         if gemini.get("current_company"):
             brief["current_company"] = gemini["current_company"]
+    if them_hints:
+        # Facts the searcher already knows (critical for sparse students).
+        brief["user_supplied_facts"] = {
+            k: v for k, v in them_hints.items() if v not in (None, "", [])
+        }
     return brief

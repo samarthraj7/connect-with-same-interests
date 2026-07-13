@@ -175,6 +175,69 @@ def _cap_list(items: Any, limit: int) -> list:
     return out
 
 
+def profile_from_research(
+    *,
+    name: str,
+    company: Optional[str],
+    summary: dict[str, Any],
+    sources: Optional[dict[str, Any]] = None,
+    contact: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Build a YOU profile from a research summary (signup self-research)."""
+    dump = {
+        "name": name,
+        "company": company,
+        "latest_summary": summary,
+        "latest_sources": sources or {},
+        "contact": contact or {},
+    }
+    flat = _from_research_profile(dump)
+    flat["crm"] = {
+        "notes": "Built from public research at signup.",
+        "source": "researched_at_signup",
+    }
+    flat["profile_source"] = "researched_at_signup"
+    flat["researched_at"] = None  # filled by caller
+    return flat
+
+
+def merge_manual_overlays(base: dict[str, Any], overlays: dict[str, Any]) -> dict[str, Any]:
+    """Layer optional signup extras onto a researched profile without wiping research."""
+    out = dict(base)
+    # Scalar overlays only if research left them empty
+    for key in ("headline", "location", "hometown_or_raised", "current_company"):
+        if overlays.get(key) and not out.get(key):
+            out[key] = overlays[key]
+    # List fields: append unique manual items (user-supplied hobbies etc.)
+    for key in (
+        "hobbies",
+        "interests",
+        "sports",
+        "education",
+        "career_highlights",
+        "causes_and_affiliations",
+        "talking_goals",
+        "avoid_topics",
+    ):
+        manual = overlays.get(key) or []
+        if not isinstance(manual, list):
+            continue
+        existing = list(out.get(key) or [])
+        for item in manual:
+            if item and item not in existing:
+                existing.append(item)
+        if existing:
+            out[key] = existing
+    # Contact merge
+    base_contact = dict(out.get("contact") or {})
+    over_contact = overlays.get("contact") if isinstance(overlays.get("contact"), dict) else {}
+    for k, v in over_contact.items():
+        if v and not base_contact.get(k):
+            base_contact[k] = v
+    out["contact"] = base_contact
+    return out
+
+
 def profile_for_overlap(profile: dict[str, Any]) -> dict[str, Any]:
     """Strip CRM/meta noise; keep only fields useful for overlap reasoning."""
     # Ensure research dumps are normalized even if caller bypassed load_user_profile.

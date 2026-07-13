@@ -69,7 +69,7 @@ export default function Home() {
       return;
     }
     setResearching(true);
-    setStatus(tier === "detailed" ? "Researching + finding common ground…" : "Running basic research…");
+    setStatus(tier === "detailed" ? "Researching + crafting conversation ideas…" : "Running basic research…");
     try {
       const res = await api.research({
         name: who,
@@ -108,7 +108,7 @@ export default function Home() {
           </View>
           <Text style={styles.hero}>Who are you meeting?</Text>
           <Text style={styles.sub}>
-            Basic (1) = briefing. Detailed (3) = overlap + icebreakers from your signup interests.
+            Basic (1) = who they are. Detailed (3) = briefing plus things to talk about and openers.
           </Text>
 
           <Field label="Name" value={name} onChangeText={setName} placeholder="Full name" />

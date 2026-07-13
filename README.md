@@ -6,7 +6,8 @@ Pre-meeting research + common-ground conversations. Terminal CLI today, mobile a
 
 - `backend/` — research connectors, synthesis, common-ground, FastAPI for the app
 - `mobile/` — Expo (React Native) app
-- Signup captures **hobbies / interests / sports** so overlap quality does not depend on scraping your socials. When someone else joins later, the same fields become their social signal.
+- **Signup researches YOU** (form + socials) and saves the full account to JSON under `backend/users/`.
+- Overlap is an internal step that produces talk topics / openers (not shown as a score).
 
 ## Backend API
 
@@ -45,18 +46,24 @@ npm start
 
 Then open in iOS Simulator, Android emulator, or Expo Go. Physical devices need `EXPO_PUBLIC_API_URL` set to your computer’s LAN IP (API must be running with `--host 0.0.0.0`).
 
-## CLI (unchanged)
+## CLI
 
 ```bash
 cd backend
-python3 cli.py --name "Someone" --company "..." --tier detailed
+python3 cli.py --name "Someone" --tier detailed
 ```
 
-Instagram/Facebook/Twitter stay off unless you pass `--social`.
+You’ll pick **full name + company**, then deep dive + detailed conversation ideas run. Thin public footprints prompt you for LinkedIn / Instagram / school facts.
 
-## What’s next
+## Data storage (MVP)
 
-- Direct LinkedIn connection send
-- Contact enrichment (email/phone)
-- Auto-refine your profile from interaction feedback
-- Real payments / token top-ups
+Accounts and researched people are stored as **JSON files** (swap for Postgres later):
+
+| Path | Contents |
+|------|----------|
+| `backend/users/<id>.json` | Email, password hash, tokens, full profile, signup form, socials |
+| `backend/users/_index.json` | email → user id |
+| `backend/profiles/*.json` | Researched people + conversation engine cache |
+| `backend/interactions/*.jsonl` | CRM-style event log |
+
+`.env` secrets and `users/` / `profiles/` are gitignored.

@@ -26,6 +26,8 @@ export type UserPublic = {
   email: string;
   tokens: number;
   profile: Record<string, any>;
+  profile_source?: string;
+  research_status?: string;
   profile_refinement?: { known_gaps?: string[]; last_from?: string };
   interaction_count?: number;
 };
@@ -76,7 +78,7 @@ export async function getToken(): Promise<string | null> {
 
 export const api = {
   signup: (body: Record<string, unknown>) =>
-    request<{ token: string; user: UserPublic }>("/auth/signup", {
+    request<{ token: string; user: UserPublic; self_research?: any }>("/auth/signup", {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -88,6 +90,11 @@ export const api = {
   me: () => request<UserPublic>("/me"),
   updateProfile: (body: Record<string, unknown>) =>
     request<UserPublic>("/me/profile", { method: "PATCH", body: JSON.stringify(body) }),
+  researchMe: (body: Record<string, unknown> = {}) =>
+    request<{ status: string; user: UserPublic }>("/me/research", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   candidates: (name: string) =>
     request<{ candidates: any[]; status: string }>("/candidates", {
       method: "POST",

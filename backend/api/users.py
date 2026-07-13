@@ -93,6 +93,16 @@ class UserStore:
         self._path(user_id).write_text(json.dumps(user, indent=2))
         return user
 
+    def replace_profile(self, user_id: str, profile: dict[str, Any]) -> dict:
+        """Overwrite the whole living YOU profile (e.g. after self-research)."""
+        user = self.get(user_id)
+        if not user:
+            raise KeyError(user_id)
+        user["profile"] = profile
+        user["updated_at"] = datetime.now(timezone.utc).isoformat()
+        self._path(user_id).write_text(json.dumps(user, indent=2))
+        return user
+
     def charge_tokens(self, user_id: str, amount: int, reason: str) -> dict:
         user = self.get(user_id)
         if not user:
