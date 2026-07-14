@@ -104,6 +104,8 @@ export default function PersonDetail() {
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [factDraft, setFactDraft] = useState("");
 
   useEffect(() => {
     if (!name) return;
@@ -176,6 +178,58 @@ export default function PersonDetail() {
             <Text style={styles.meta}>Identity: {summary.identity_confidence}</Text>
           ) : null}
           {error ? <Text style={styles.err}>{error}</Text> : null}
+
+          <Button
+            title={refreshing ? "Refreshing…" : "Refresh (stale sources)"}
+            variant="ghost"
+            loading={refreshing}
+            onPress={async () => {
+              setRefreshing(true);
+              setError("");
+              try {
+                const res = await api.refreshPerson(String(name), company || null);
+                const next = await api.person(String(name), company || null);
+                setData({ ...next, whats_new: res.whats_new || next.whats_new });
+              } catch (e: any) {
+                setError(e.message);
+              } finally {
+                setRefreshing(false);
+              }
+            }}
+            style={{ marginBottom: 8 }}
+          />
+
+          {(data?.whats_new?.changes || []).length ? (
+            <>
+              <SectionTitle>What’s new</SectionTitle>
+              {(data.whats_new.changes as any[]).map((c, i) => (
+                <Bullet key={i}>
+                  {c.detail || c.type}
+                  {c.source ? ` (${c.source})` : ""}
+                  {c.snippet ? ` — ${c.snippet}` : ""}
+                </Bullet>
+              ))}
+            </>
+          ) : null}
+
+          {(data?.mutuals || []).length ? (
+            <>
+              <SectionTitle>People you may both know</SectionTitle>
+              <Body>From your LinkedIn connections export — only when evidence matches.</Body>
+              {(data.mutuals as any[]).map((m, i) => (
+                <Bullet key={i}>
+                  {m.name}
+                  {m.company ? ` · ${m.company}` : ""}
+                </Bullet>
+              ))}
+            </>
+          ) : null}
+          {data?.in_your_network ? (
+            <Text style={styles.meta}>
+              In your LinkedIn network
+              {data.in_your_network.connected_on ? ` · connected ${data.in_your_network.connected_on}` : ""}
+            </Text>
+          ) : null}
 
           {/* 1. Who they are */}
           {summary.summary ? (
@@ -330,6 +384,46 @@ export default function PersonDetail() {
                 {x.at ? ` (${String(x.at).slice(0, 10)})` : ""}
               </Bullet>
             ))}
+
+          <SectionTitle>Pending facts</SectionTitle>
+          <Body>Claims you add wait for corroboration unless you mark them as personal knowledge.</Body>
+          <Field label="Claim" value={factDraft} onChangeText={setFactDraft} placeholder="They founded X in 2019…" />
+          <Button
+            title="Add as pending"
+            onPress={async () => {
+              if (!factDraft.trim()) return;
+              await api.addPendingFact({
+                claim: factDraft.trim(),
+                person_name: String(name),
+                person_company: company || null,
+              });
+              setFactDraft("");
+              const res = await api.person(String(name), company || null);
+              setData(res);
+            }}
+            style={{ marginBottom: 8 }}
+          />
+          <Button
+            title="I know this personally"
+            variant="ghost"
+            onPress={async () => {
+              if (!factDraft.trim()) return;
+              await api.addPendingFact({
+                claim: factDraft.trim(),
+                person_name: String(name),
+                person_company: company || null,
+                trusted_personal: true,
+              });
+              setFactDraft("");
+              const res = await api.person(String(name), company || null);
+              setData(res);
+            }}
+          />
+          {(data?.pending_facts || []).map((f: any) => (
+            <Bullet key={f.id}>
+              [{f.status}] {f.claim}
+            </Bullet>
+          ))}
         </ScrollView>
       </SafeAreaView>
     </ScreenBackdrop>

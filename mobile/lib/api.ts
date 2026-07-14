@@ -30,6 +30,10 @@ export type UserPublic = {
   research_status?: string;
   profile_refinement?: { known_gaps?: string[]; last_from?: string };
   interaction_count?: number;
+  settings?: Record<string, any>;
+  connections_count?: number;
+  pending_facts?: any[];
+  handle_verification?: Record<string, any>;
 };
 
 async function authHeaders(): Promise<Record<string, string>> {
@@ -114,4 +118,56 @@ export const api = {
       body: JSON.stringify({ type: "note", note }),
     });
   },
+  verifyHandles: (body: Record<string, unknown>) =>
+    request<{ status: string; results: Record<string, any> }>("/verify/handles", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  uploadConnections: (body: { csv: string; filename?: string }) =>
+    request<{ ok: boolean; imported: number }>("/me/connections", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  connections: () => request<{ count: number; sample: any[] }>("/me/connections"),
+  updateSettings: (body: Record<string, unknown>) =>
+    request<UserPublic>("/me/settings", { method: "PATCH", body: JSON.stringify(body) }),
+  refreshPerson: (name: string, company?: string | null) => {
+    const q = company ? `?company=${encodeURIComponent(company)}` : "";
+    return request<any>(`/people/${encodeURIComponent(name)}/refresh${q}`, { method: "POST" });
+  },
+  addPendingFact: (body: Record<string, unknown>) =>
+    request("/me/pending-facts", { method: "POST", body: JSON.stringify(body) }),
+  updatePendingFact: (id: string, body: Record<string, unknown>) =>
+    request(`/me/pending-facts/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  privateJournal: () => request<{ visibility: string; entries: any[] }>("/me/private/journal"),
+  addPrivateJournal: (body: { body: string; entry_type?: string; tags?: string[] }) =>
+    request("/me/private/journal", { method: "POST", body: JSON.stringify(body) }),
+  deletePrivateJournal: (id: string) =>
+    request(`/me/private/journal/${id}`, { method: "DELETE" }),
+  publicCandidates: (body: Record<string, unknown>) =>
+    fetch(`${API_BASE}/public/candidates`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(async (res) => {
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.detail || data?.error || "Failed");
+      return data as { candidates: any[]; status: string };
+    }),
+  sendOtp: (body: { channel: "email" | "phone"; destination?: string }) =>
+    request<{ status: string; debug_code?: string; destination_hint?: string }>("/auth/otp/send", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  verifyOtp: (body: { channel: "email" | "phone"; code: string }) =>
+    request<{ ok: boolean; user: UserPublic }>("/auth/otp/verify", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  calendarOAuthUrl: (redirectUri: string) =>
+    request<{ status: string; url?: string }>(
+      `/calendar/oauth-url?redirect_uri=${encodeURIComponent(redirectUri)}`
+    ),
+  calendarSyncPrep: () => request<any>("/calendar/sync-prep", { method: "POST" }),
+  calendarPrepQueue: () => request<{ queue: any[] }>("/calendar/prep-queue"),
 };

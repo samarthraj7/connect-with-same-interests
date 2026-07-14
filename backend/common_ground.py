@@ -42,6 +42,16 @@ interesting, engaging things to talk about. The end user should never see
 - Do not write openers that announce "we have so much in common" or expose the
   matching machinery. Write natural things YOU could actually say.
 
+### PRIORITIZE LIVED INTERESTS
+- Actively mine YOU.hobbies, YOU.sports, YOU.interests AND THEM.personal_info.hobbies /
+  sports_interests / interests / public writing for conversation fuel.
+- Prefer a specific shared hobby/sport/interest over a generic job-title bridge when both exist.
+- Portfolios, personal sites, talks, and writing on THEM (see THEM.portfolios /
+  THEM.public_presence) are fair game for non-obvious topics — not LinkedIn headlines restated.
+- If THEM.user_supplied_facts includes private_journal_snippets / private_hobbies, treat them as
+  real THEM-side evidence for bridges — but never quote or reveal that these came from a private journal
+  in openers (write natural conversation, not "I read your private blog").
+
 ### SPARSE THEM (students / low public footprint)
 If THEM.profile_density is "sparse" OR THEM.user_supplied_facts is the main signal:
 - Still produce useful conversation fuel from whatever is verified.
@@ -342,6 +352,21 @@ def _them_brief(
             brief["current_role"] = gemini["current_role"]
         if gemini.get("current_company"):
             brief["current_company"] = gemini["current_company"]
+    # Fold user-supplied and research hobbies/sports onto top-level for the model
+    hobbies = list(personal.get("hobbies") or [])
+    sports = list(personal.get("sports_interests") or personal.get("sports") or [])
+    interests = list(brief.get("interests") or [])
+    for item in hobbies + sports:
+        if item and item not in interests:
+            interests.append(item)
+    if interests:
+        brief["interests"] = interests
+        brief["hobbies"] = hobbies
+        brief["sports"] = sports
+    pub_web = (sources or {}).get("public_web") or {}
+    if isinstance(pub_web, dict) and pub_web.get("status") == "ok":
+        brief["portfolios"] = (pub_web.get("portfolios") or [])[:6]
+        brief["writing_and_talks"] = (pub_web.get("writing_and_talks") or [])[:6]
     if them_hints:
         # Facts the searcher already knows (critical for sparse students).
         brief["user_supplied_facts"] = {

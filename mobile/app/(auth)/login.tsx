@@ -6,11 +6,14 @@ import { ScreenBackdrop } from "../../components/ScreenBackdrop";
 import { BrandMark, Button, Field } from "../../components/ui";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
-import { colors, fonts, space } from "../../lib/theme";
+import { fonts, space } from "../../lib/theme";
+import { useTheme } from "../../lib/theme-context";
 
+/** Full-page login fallback; welcome uses AuthModal for the primary path. */
 export default function Login() {
   const router = useRouter();
   const { setSession } = useAuth();
+  const { colors } = useTheme();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -36,10 +39,12 @@ export default function Login() {
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
           <ScrollView contentContainerStyle={styles.pad} keyboardShouldPersistTaps="handled">
             <BrandMark />
-            <Text style={styles.hint}>Welcome back.</Text>
+            <Text style={{ fontFamily: fonts.body, color: colors.muted, marginVertical: space.lg, fontSize: 16 }}>
+              Welcome back.
+            </Text>
             <Field label="Email" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
             <Field label="Password" secureTextEntry value={password} onChangeText={setPassword} />
-            {error ? <Text style={styles.err}>{error}</Text> : null}
+            {error ? <Text style={{ color: colors.danger, fontFamily: fonts.bodyMed, marginBottom: 12 }}>{error}</Text> : null}
             <Button title="Sign in" onPress={onSubmit} loading={loading} />
             <Button title="Back" variant="ghost" onPress={() => router.back()} style={{ marginTop: 10 }} />
           </ScrollView>
@@ -51,6 +56,4 @@ export default function Login() {
 
 const styles = StyleSheet.create({
   pad: { padding: space.lg, paddingTop: space.xl },
-  hint: { fontFamily: fonts.body, color: colors.muted, marginVertical: space.lg, fontSize: 16 },
-  err: { color: colors.danger, fontFamily: fonts.bodyMed, marginBottom: 12 },
 });

@@ -245,6 +245,18 @@ def profile_for_overlap(profile: dict[str, Any]) -> dict[str, Any]:
         profile = _from_research_profile(profile)
 
     slim = {k: profile.get(k) for k in _OVERLAP_KEYS if profile.get(k) not in (None, "", [])}
+    # Always surface hobbies/sports/interests even if empty lists were filtered —
+    # caller's signup_form may nest them under contact or signup_form.
+    signup = profile.get("signup_form") if isinstance(profile.get("signup_form"), dict) else {}
+    for key in ("hobbies", "interests", "sports"):
+        vals = list(slim.get(key) or profile.get(key) or signup.get(key) or [])
+        # de-dupe
+        out = []
+        for v in vals:
+            if v and v not in out:
+                out.append(v)
+        if out:
+            slim[key] = out
     # Extra signal from normalized research dumps
     for extra in ("summary_blurb", "notable_points"):
         if profile.get(extra):

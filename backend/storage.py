@@ -17,7 +17,14 @@ GEMINI_GROUP = {
     "linkedin_public",
 }
 SOCIAL_SOURCES = frozenset({"instagram_public", "facebook_public", "twitter_public"})
-INDEPENDENT_SOURCES = {"github", "patents", "exa_search", "personal_info"} | set(SOCIAL_SOURCES)
+INDEPENDENT_SOURCES = {
+    "apollo",
+    "github",
+    "patents",
+    "exa_search",
+    "personal_info",
+    "public_web",
+} | set(SOCIAL_SOURCES)
 ALL_SOURCES = INDEPENDENT_SOURCES | GEMINI_GROUP
 
 # A source only counts as "checked" for caching purposes if it reached a real,
@@ -127,6 +134,23 @@ class ProfileStore:
         if usage is not None:
             existing["latest_usage"] = usage
 
+        # Incremental freshness fingerprints + what's-new since last save
+        try:
+            from freshness import attach_fingerprints_to_record, compute_whats_new
+
+            prev = dict(existing)
+            changes = compute_whats_new(prev, merged_profile.get("sources") or {}, summary)
+            if changes:
+                existing["whats_new"] = {
+                    "at": merged_profile["fetched_at"],
+                    "changes": changes,
+                }
+                existing.setdefault("whats_new_history", []).append(existing["whats_new"])
+                existing["whats_new_history"] = existing["whats_new_history"][-20:]
+            attach_fingerprints_to_record(existing, existing.get("latest_sources") or {})
+        except Exception:
+            pass
+
         # Seed contact slots from research when empty (email/phone/linkedin later).
         contact = existing.setdefault("contact", {})
         _seed_contact_from_sources(contact, existing.get("latest_sources") or {})
@@ -140,6 +164,23 @@ class ProfileStore:
         existing.setdefault("search_history", []).append(history_entry)
 
         path.write_text(json.dumps(existing, indent=2))
+
+        # Dual-write to Supabase when configured
+        try:
+            from db import upsert_person_snapshot
+
+            upsert_person_snapshot(
+                slug=path.stem,
+                name=name,
+                company=company,
+                contact=contact,
+                sources=existing.get("latest_sources") or {},
+                summary=summary,
+                conversation_engine=common_ground,
+                fingerprints=existing.get("content_fingerprints"),
+            )
+        except Exception:
+            pass
         return path
 
     def record_interaction(
@@ -175,6 +216,14 @@ class ProfileStore:
 
 def _seed_contact_from_sources(contact: dict, sources: dict) -> None:
     """Fill missing contact fields from public research (never overwrite user edits)."""
+    apollo = sources.get("apollo") or {}
+    if apollo.get("status") == "ok":
+        if not contact.get("linkedin_url") and apollo.get("linkedin_url"):
+            contact["linkedin_url"] = apollo["linkedin_url"]
+        if not contact.get("email") and apollo.get("email"):
+            contact["email"] = apollo["email"]
+        if not contact.get("title") and apollo.get("title"):
+            contact["title"] = apollo["title"]
     if not contact.get("linkedin_url"):
         for key in ("exa_search", "gemini_search", "linkedin_public"):
             src = sources.get(key) or {}

@@ -13,20 +13,22 @@ MODEL = os.environ.get("GEMINI_MODEL") or "gemini-2.5-flash"
 VERIFIED_PAGE_LIMIT = 8
 
 CANDIDATE_PROMPT_TEMPLATE = """Search the public web — including LinkedIn search results, \
-company directories, and news — for people named "{name}". Real-world names are often shared \
-by several different people; your job is to help tell them apart.
+company directories, news, and conference/speaker pages — for people named "{name}". Real-world \
+names are often shared by several different people; your job is to help tell them apart.
 
 List every distinct individual you can find real evidence for, up to 8. For each one, report \
 whatever of the following you can actually confirm from search results: current company, \
-current role/title, general location, and their LinkedIn profile URL if one appears in results \
-(a link only — you cannot see what's posted behind it). Do not merge different people into one \
+current role/title, general location, their LinkedIn profile URL if one appears in results \
+(a link only — you cannot see what's posted behind it), and a publicly reachable profile photo \
+URL if search results or page thumbnails include one (LinkedIn CDN media.licdn.com, company \
+headshots, speaker pages, etc.). Do not invent photo URLs. Do not merge different people into one \
 entry. Do not invent information — if you can only confirm a name and nothing else, list that \
 entry with the other fields null.
 
 Respond with strict JSON only, no markdown fences, matching this schema exactly:
 {{
   "candidates": [
-    {{"name": string, "company": string or null, "role": string or null, "location": string or null, "linkedin_url": string or null, "context": string}}
+    {{"name": string, "company": string or null, "role": string or null, "location": string or null, "linkedin_url": string or null, "photo_url": string or null, "context": string}}
   ]
 }}
 """
@@ -130,7 +132,50 @@ def find_candidates(name: str) -> dict:
         return {"status": "error", "error": "could not parse Gemini response as JSON", "raw_text": response.text}
 
     candidates = parsed.get("candidates") or []
+    # Enrich missing photos via Apollo / public og:image (best-effort, parallel).
+    candidates = _enrich_candidate_photos(candidates)
     return {"status": "ok" if candidates else "not_found", "candidates": candidates}
+
+
+def _enrich_candidate_photos(candidates: list) -> list:
+    """Fill photo_url when Gemini didn't find one — Apollo first, then OG image."""
+    if not candidates:
+        return candidates
+
+    def enrich_one(c: dict) -> dict:
+        if not isinstance(c, dict):
+            return c
+        out = dict(c)
+        if out.get("photo_url"):
+            return out
+        name = (out.get("name") or "").strip()
+        company = (out.get("company") or "").strip() or None
+        linkedin = (out.get("linkedin_url") or "").strip() or None
+        # 1) Apollo licensed photo when key present
+        if name:
+            try:
+                from connectors import apollo
+
+                hit = apollo.enrich_person(name=name, company=company, linkedin_url=linkedin)
+                if hit.get("status") == "ok" and hit.get("photo_url"):
+                    out["photo_url"] = hit["photo_url"]
+                    out["photo_source"] = "apollo"
+                    return out
+            except Exception:
+                pass
+        # 2) Public page og:image (company bio / personal site / LinkedIn when exposed)
+        for url in (linkedin,):
+            if not url:
+                continue
+            og = fetch_open_graph(url)
+            if og.get("status") == "ok" and og.get("image"):
+                out["photo_url"] = og["image"]
+                out["photo_source"] = "opengraph"
+                return out
+        return out
+
+    with ThreadPoolExecutor(max_workers=min(6, max(1, len(candidates)))) as pool:
+        return list(pool.map(enrich_one, candidates))
 
 
 def search_person(

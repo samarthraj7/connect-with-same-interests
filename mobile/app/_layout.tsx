@@ -8,12 +8,13 @@ import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { AuthProvider, useAuth } from "../lib/auth";
-import { colors } from "../lib/theme";
+import { ThemeProvider, useTheme } from "../lib/theme-context";
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
+  const { colors } = useTheme();
   const segments = useSegments();
   const router = useRouter();
 
@@ -34,6 +35,18 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function ThemedRoot() {
+  const { colors } = useTheme();
+  return (
+    <>
+      <StatusBar style={colors.statusBar} />
+      <AuthGate>
+        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.paper } }} />
+      </AuthGate>
+    </>
+  );
+}
+
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     Fraunces_600SemiBold,
@@ -49,11 +62,10 @@ export default function RootLayout() {
   if (!fontsLoaded) return null;
 
   return (
-    <AuthProvider>
-      <StatusBar style="dark" />
-      <AuthGate>
-        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.paper } }} />
-      </AuthGate>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <ThemedRoot />
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
