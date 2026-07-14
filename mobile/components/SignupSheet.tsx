@@ -29,6 +29,46 @@ type Candidate = {
   context?: string;
 };
 
+function CandidateAvatar({
+  name,
+  photoUrl,
+  mist,
+  forest,
+}: {
+  name: string;
+  photoUrl?: string;
+  mist: string;
+  forest: string;
+}) {
+  const [broken, setBroken] = useState(false);
+  const showImg = !!photoUrl && !broken;
+  if (showImg) {
+    return (
+      <Image
+        source={{ uri: photoUrl }}
+        onError={() => setBroken(true)}
+        style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: mist }}
+      />
+    );
+  }
+  return (
+    <View
+      style={{
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: mist,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Text style={{ fontFamily: fonts.bodySemi, color: forest, fontSize: 16 }}>
+        {(name || "?")[0].toUpperCase()}
+      </Text>
+    </View>
+  );
+}
+
 const PHASES = [
   "Creating your account…",
   "Searching public web & news…",
@@ -79,6 +119,8 @@ export function SignupSheet({ visible, onClose }: Props) {
       setPicked(null);
       setShowFilters(false);
       if (timer.current) clearInterval(timer.current);
+    } else {
+      console.log("[SignupSheet] open — API_BASE=", API_BASE);
     }
   }, [visible]);
 
@@ -89,26 +131,46 @@ export function SignupSheet({ visible, onClose }: Props) {
       return;
     }
     setLoading(true);
+    const payload = {
+      name: name.trim(),
+      company: company.trim() || null,
+      university: university.trim() || null,
+      linkedin_url: linkedin.trim() || null,
+    };
+    const url = `${API_BASE}/public/candidates`;
+    console.log("[Find me] POST", url, payload);
     try {
-      const res = await fetch(`${API_BASE}/public/candidates`, {
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: name.trim(),
-          company: company.trim() || null,
-          university: university.trim() || null,
-          linkedin_url: linkedin.trim() || null,
-        }),
+        body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.detail || data?.error || "Candidate search failed");
-      setCandidates(data.candidates || []);
-      if (!(data.candidates || []).length) {
-        setError("No matches yet — adjust filters or continue with your name + optional company/LinkedIn.");
+      const text = await res.text();
+      console.log("[Find me] status", res.status, "body", text.slice(0, 2000));
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        throw new Error(`Bad response from ${url}: ${text.slice(0, 200)}`);
+      }
+      if (!res.ok) throw new Error(data?.detail || data?.error || `HTTP ${res.status}`);
+      const list = data.candidates || [];
+      setCandidates(list);
+      if (data.warning === "no_public_matches" || (!list.length && !data.error)) {
+        setError("No public matches — tap the name card (or add company/LinkedIn) to continue.");
+      } else if (!list.length) {
+        setError(
+          data.error
+            ? `Search issue: ${data.error}`
+            : "No matches yet — adjust filters or continue with your name + optional company/LinkedIn.",
+        );
+      } else if (list.length === 1 && (list[0].context || "").toLowerCase().includes("no public")) {
+        setError("No public matches found — select this card or add company/LinkedIn filters.");
       }
       setStep(1);
     } catch (e: any) {
-      setError(e.message || "Search failed");
+      console.error("[Find me] FAILED", e);
+      setError(`${e.message || "Search failed"} (API: ${API_BASE})`);
     } finally {
       setLoading(false);
     }
@@ -260,6 +322,9 @@ export function SignupSheet({ visible, onClose }: Props) {
                   <Text style={{ fontFamily: fonts.body, color: colors.muted, marginBottom: 8, lineHeight: 20 }}>
                     We’ll suggest people who match this name. Everything else is optional.
                   </Text>
+                  <Text style={{ fontFamily: fonts.body, color: colors.muted, marginBottom: 8, fontSize: 11 }}>
+                    API: {API_BASE}
+                  </Text>
                 </View>
               )}
 
@@ -299,31 +364,16 @@ export function SignupSheet({ visible, onClose }: Props) {
                         alignItems: "center",
                       }}
                     >
-                      {c.photo_url ? (
-                        <Image
-                          source={{ uri: c.photo_url }}
-                          style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: colors.mist }}
-                        />
-                      ) : (
-                        <View
-                          style={{
-                            width: 48,
-                            height: 48,
-                            borderRadius: 24,
-                            backgroundColor: colors.mist,
-                            alignItems: "center",
-                            justifyContent: "center",
-                          }}
-                        >
-                          <Text style={{ fontFamily: fonts.bodySemi, color: colors.forest, fontSize: 16 }}>
-                            {(c.name || "?")[0].toUpperCase()}
-                          </Text>
-                        </View>
-                      )}
+                      <CandidateAvatar
+                        name={c.name}
+                        photoUrl={c.photo_url}
+                        mist={colors.mist}
+                        forest={colors.forest}
+                      />
                       <View style={{ flex: 1 }}>
                         <Text style={{ fontFamily: fonts.bodySemi, color: colors.ink }}>{c.name}</Text>
                         <Text style={{ fontFamily: fonts.body, color: colors.muted, marginTop: 4, fontSize: 13 }}>
-                          {[c.name, c.company, c.role].filter(Boolean).join(" · ")}
+                          {[c.company, c.role].filter(Boolean).join(" · ") || c.context || ""}
                         </Text>
                       </View>
                     </Pressable>

@@ -640,22 +640,46 @@ def _candidates_impl(body: CandidatesBody):
     from connectors import gemini_search
 
     name = body.name.strip()
+    print("=" * 60, flush=True)
+    print(f"[/public/candidates] REQUEST name={name!r}", flush=True)
+    print(
+        f"  filters company={body.company!r} university={body.university!r} "
+        f"linkedin={body.linkedin_url!r}",
+        flush=True,
+    )
     if not name:
+        print("[/public/candidates] REJECT empty name", flush=True)
         raise HTTPException(400, "Name required")
+
     result = gemini_search.find_candidates(name)
-    if result.get("status") != "ok":
-        return {"candidates": [], "status": result.get("status"), "error": result.get("error")}
-    cands = result.get("candidates") or []
+    status = result.get("status")
+    err = result.get("error") or result.get("reason")
+    print(f"[/public/candidates] gemini status={status!r} error={err!r}", flush=True)
+
+    if status == "skipped":
+        print(f"[/public/candidates] SKIPPED: {err}", flush=True)
+        return {"candidates": [], "status": status, "error": err or "Gemini unavailable"}
+    if status == "error":
+        print(f"[/public/candidates] ERROR: {err}", flush=True)
+        return {"candidates": [], "status": status, "error": err or "Candidate search failed"}
+    if status != "ok":
+        print(f"[/public/candidates] not_found / empty — returning []", flush=True)
+        return {"candidates": [], "status": status or "not_found", "error": err}
+
+    cands = list(result.get("candidates") or [])
+    before = len(cands)
     company = (body.company or "").strip().lower()
     university = (body.university or "").strip().lower()
     linkedin = (body.linkedin_url or "").strip().lower()
     if company:
-        cands = [
+        filtered = [
             c
             for c in cands
             if company in (c.get("company") or "").lower()
             or company in (c.get("context") or "").lower()
-        ] or cands
+        ]
+        print(f"[/public/candidates] company filter {company!r}: {before} → {len(filtered) or before}", flush=True)
+        cands = filtered or cands
     if university:
         filtered = [
             c
@@ -664,6 +688,7 @@ def _candidates_impl(body: CandidatesBody):
             or university in (c.get("location") or "").lower()
             or university in (c.get("company") or "").lower()
         ]
+        print(f"[/public/candidates] university filter {university!r}: {len(cands)} → {len(filtered) or len(cands)}", flush=True)
         if filtered:
             cands = filtered
     if linkedin:
@@ -673,9 +698,20 @@ def _candidates_impl(body: CandidatesBody):
             if linkedin in (c.get("linkedin_url") or "").lower()
             or linkedin.replace("https://", "") in (c.get("linkedin_url") or "").lower()
         ]
+        print(f"[/public/candidates] linkedin filter: {len(cands)} → {len(filtered) or len(cands)}", flush=True)
         if filtered:
             cands = filtered
-    return {"candidates": cands, "status": "ok"}
+
+    print(f"[/public/candidates] RESPONSE ok count={len(cands)}", flush=True)
+    for i, c in enumerate(cands):
+        print(f"  → [{i}] {c.get('name')} @ {c.get('company')} | {c.get('role')}", flush=True)
+    print("=" * 60, flush=True)
+    out = {"candidates": cands, "status": "ok"}
+    if result.get("warning"):
+        out["warning"] = result["warning"]
+    if result.get("discovery"):
+        out["discovery"] = result["discovery"]
+    return out
 
 
 @app.post("/research")
@@ -888,6 +924,9 @@ def health():
         "ok": True,
         "service": "connect-deeply",
         "apollo_configured": bool((os.environ.get("APOLLO_API_KEY") or "").strip()),
+        "enrichlayer_configured": bool(
+            (os.environ.get("ENRICHLAYER_API_KEY") or os.environ.get("ENRICH_LAYER_API_KEY") or "").strip()
+        ),
         "supabase_configured": supabase_enabled(),
         "calendar_configured": calendar_configured(),
     }

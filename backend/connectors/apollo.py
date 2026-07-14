@@ -25,6 +25,7 @@ def enrich_person(
     domain: Optional[str] = None,
     linkedin_url: Optional[str] = None,
     email: Optional[str] = None,
+    timeout: float = 45,
 ) -> dict[str, Any]:
     """People match/enrich via Apollo. Primary enrichment path when key is set."""
     key = _api_key()
@@ -63,12 +64,12 @@ def enrich_person(
     try:
         # Prefer people/match; fall back to enrichment endpoint shape.
         url = f"{APOLLO_BASE}/people/match"
-        resp = requests.post(url, json=payload, timeout=45)
+        resp = requests.post(url, json=payload, timeout=timeout)
         if resp.status_code == 401:
             return {"status": "error", "error": "Apollo unauthorized — check APOLLO_API_KEY"}
         if resp.status_code == 422 or resp.status_code == 404:
             # Try search as weaker match
-            return _search_fallback(key, name=name, company=company)
+            return _search_fallback(key, name=name, company=company, timeout=timeout)
         if resp.status_code >= 400:
             return {
                 "status": "error",
@@ -78,13 +79,15 @@ def enrich_person(
         data = resp.json() if resp.content else {}
         person = data.get("person") or data.get("people", [None])[0]
         if not person:
-            return _search_fallback(key, name=name, company=company)
+            return _search_fallback(key, name=name, company=company, timeout=timeout)
         return _normalize_person(person)
     except requests.RequestException as e:
         return {"status": "error", "error": str(e)}
 
 
-def _search_fallback(key: str, *, name: str, company: Optional[str]) -> dict[str, Any]:
+def _search_fallback(
+    key: str, *, name: str, company: Optional[str], timeout: float = 45
+) -> dict[str, Any]:
     try:
         payload: dict[str, Any] = {
             "api_key": key,
@@ -94,7 +97,7 @@ def _search_fallback(key: str, *, name: str, company: Optional[str]) -> dict[str
         }
         if company:
             payload["q_organization_name"] = company
-        resp = requests.post(f"{APOLLO_BASE}/mixed_people/search", json=payload, timeout=45)
+        resp = requests.post(f"{APOLLO_BASE}/mixed_people/search", json=payload, timeout=timeout)
         if resp.status_code >= 400:
             return {"status": "not_found", "error": f"Apollo search HTTP {resp.status_code}"}
         data = resp.json() if resp.content else {}

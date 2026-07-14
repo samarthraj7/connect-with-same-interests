@@ -5,11 +5,26 @@ import { Platform } from "react-native";
 const TOKEN_KEY = "cd_token";
 const USER_KEY = "cd_user";
 
+/**
+ * WHERE TO UPDATE THE API URL (physical phone / Expo Go):
+ * 1) This file — DEV_API_URL below (fastest; reload the app after changing)
+ * 2) mobile/.env — EXPO_PUBLIC_API_URL=http://YOUR_MAC_LAN_IP:8000
+ *    then restart Expo: cd mobile && npx expo start -c
+ *
+ * Find your Mac IP:  ipconfig getifaddr en0
+ * API must bind all interfaces:  uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+ */
+const DEV_API_URL = ""; // e.g. "http://192.168.1.10:8000" for a physical device
+
 function defaultBaseUrl(): string {
-  // Android emulator reaches host via 10.0.2.2; iOS simulator via localhost.
-  // Physical device: set EXPO_PUBLIC_API_URL to your machine LAN IP.
+  // 1) Explicit override for physical devices (edit DEV_API_URL above when Wi‑Fi IP changes)
+  if (DEV_API_URL) return DEV_API_URL.replace(/\/$/, "");
+
+  // 2) Expo env (requires restart of Metro after editing mobile/.env)
   const fromEnv = process.env.EXPO_PUBLIC_API_URL;
   if (fromEnv) return fromEnv.replace(/\/$/, "");
+
+  // 3) Same host Expo Metro is using (often wrong / stale on campus Wi‑Fi)
   const hostUri = Constants.expoConfig?.hostUri;
   const host = hostUri?.split(":")[0];
   if (host && host !== "127.0.0.1" && host !== "localhost") {
@@ -20,6 +35,7 @@ function defaultBaseUrl(): string {
 }
 
 export const API_BASE = defaultBaseUrl();
+console.log("[api] API_BASE =", API_BASE, "| env=", process.env.EXPO_PUBLIC_API_URL);
 
 export type UserPublic = {
   id: string;
