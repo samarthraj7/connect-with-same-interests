@@ -13,24 +13,29 @@ def fetch_open_graph(url: str) -> dict:
     if not url:
         return {"status": "skipped", "reason": "no url"}
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
+        resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT, allow_redirects=True)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
 
         tags = {}
         for tag in soup.find_all("meta"):
             key = tag.get("property") or tag.get("name")
-            if key and (key.startswith("og:") or key in ("description", "twitter:description")):
+            if key and (
+                key.startswith("og:")
+                or key.startswith("twitter:")
+                or key in ("description", "twitter:description", "twitter:image")
+            ):
                 tags[key] = tag.get("content")
 
         title_tag = soup.find("title")
         title = tags.get("og:title") or (title_tag.text.strip() if title_tag else None)
         description = tags.get("og:description") or tags.get("description")
+        image = tags.get("og:image") or tags.get("twitter:image") or tags.get("twitter:image:src")
 
         # Sites like Instagram serve a near-empty JS app shell to logged-out, non-browser
         # requests — no og tags, no real <title> — so say so plainly instead of returning
         # a hollow "ok" that looks like real data.
-        if not title and not description:
+        if not title and not description and not image:
             return {"status": "no_public_data", "requested_url": url, "url": resp.url}
 
         return {
@@ -39,6 +44,7 @@ def fetch_open_graph(url: str) -> dict:
             "url": resp.url,  # resolved destination — grounding/redirect links aren't the real page URL
             "title": title,
             "description": description,
+            "image": image,
             "site_name": tags.get("og:site_name"),
         }
     except requests.RequestException as exc:

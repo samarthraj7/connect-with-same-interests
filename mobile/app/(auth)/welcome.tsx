@@ -1,15 +1,17 @@
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { Animated, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { AuthModal } from "../../components/AuthModal";
+import { SignupSheet } from "../../components/SignupSheet";
 import { Button } from "../../components/ui";
-import { colors, fonts, space } from "../../lib/theme";
+import { fonts, space } from "../../lib/theme";
 
 export default function Welcome() {
-  const router = useRouter();
   const fade = React.useRef(new Animated.Value(0)).current;
   const rise = React.useRef(new Animated.Value(18)).current;
+  const [loginOpen, setLoginOpen] = useState(false);
+  const [signupOpen, setSignupOpen] = useState(false);
 
   useEffect(() => {
     Animated.parallel([
@@ -28,23 +30,27 @@ export default function Welcome() {
       />
       <View style={styles.glow} />
       <SafeAreaView style={styles.safe}>
-        <Animated.View style={{ opacity: fade, transform: [{ translateY: rise }], flex: 1, justifyContent: "space-between" }}>
+        <Animated.View
+          style={{ opacity: fade, transform: [{ translateY: rise }], flex: 1, justifyContent: "space-between" }}
+        >
           <View style={{ marginTop: space.xxl }}>
             <Text style={styles.brand}>Connect Deeply</Text>
             <Text style={styles.line}>Know what you share before you say hello.</Text>
           </View>
           <View style={{ gap: 12, marginBottom: space.lg }}>
-            <Button title="Create account" onPress={() => router.push("/(auth)/signup")} variant="ember" />
-            <Button title="Sign in" onPress={() => router.push("/(auth)/login")} variant="ghost" style={styles.ghostOnDark} />
+            <Button title="Create account" onPress={() => setSignupOpen(true)} variant="ember" />
+            <Button title="Sign in" onPress={() => setLoginOpen(true)} variant="ghost" style={styles.ghostOnDark} />
           </View>
         </Animated.View>
       </SafeAreaView>
+      <AuthModal visible={loginOpen} onClose={() => setLoginOpen(false)} initialMode="login" />
+      <SignupSheet visible={signupOpen} onClose={() => setSignupOpen(false)} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.forest },
+  root: { flex: 1, backgroundColor: "#1A2F28" },
   glow: {
     position: "absolute",
     width: 320,
@@ -59,7 +65,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.display,
     fontSize: 48,
     lineHeight: 54,
-    color: colors.chalk,
+    color: "#FBFCFA",
     letterSpacing: -1,
   },
   line: {

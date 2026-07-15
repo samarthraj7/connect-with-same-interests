@@ -13,6 +13,7 @@ from common_ground import (
     TOKEN_COST_DETAILED,
     analyze_common_ground,
     apply_overlap_to_summary,
+    public_conversation,
 )
 from connectors import gemini_search
 from merge import merge_profile
@@ -25,34 +26,93 @@ load_dotenv()
 
 
 def choose_candidate(name: str) -> Optional[dict]:
-    """Runs the disambiguation search and lets the user pick which person
-    they mean before the expensive deep dive runs. Returns None (search
-    broadly, no pre-fill) if there's nothing to disambiguate or the user
-    skips it."""
+    """Ask the user to pick Full Name + Company before the deep dive."""
     print(f"\nSearching for people named '{name}' ...")
     result = gemini_search.find_candidates(name)
 
     if result.get("status") != "ok" or not result.get("candidates"):
-        print("  No distinct candidates surfaced — proceeding with a general search.")
-        return None
+        print("  No distinct candidates surfaced.")
+        company = input("  Enter their company / school to continue (required): ").strip()
+        if not company:
+            print("  Company/school is required to deep-dive the right person.")
+            return None
+        return {"name": name, "company": company}
 
     candidates = result["candidates"]
-    print(f"\nFound {len(candidates)} possible match(es):")
+    print(f"\nFound {len(candidates)} possible match(es) — pick one (full name + company):\n")
     for i, c in enumerate(candidates, 1):
-        role = c.get("role") or "role unknown"
-        company = c.get("company") or "company unknown"
-        location = f" — {c['location']}" if c.get("location") else ""
-        link = f"\n     {c['linkedin_url']}" if c.get("linkedin_url") else ""
-        print(f"  {i}. {c['name']} — {role} at {company}{location}{link}")
+        full = c.get("name") or name
+        company = c.get("company") or "(company unknown)"
+        role = c.get("role") or ""
+        location = c.get("location") or ""
+        print(f"  {i}. {full}")
+        print(f"     company: {company}")
+        if role:
+            print(f"     role:    {role}")
+        if location:
+            print(f"     place:   {location}")
+        if c.get("linkedin_url"):
+            print(f"     linkedin:{c['linkedin_url']}")
+        print()
 
-    choice = input(f"\nChoose a person [1-{len(candidates)}], or press enter to search broadly: ").strip()
-    if not choice:
-        return None
+    print(f"  {len(candidates) + 1}. None of these — I'll type company/school myself")
+    choice = input(f"\nChoose [1-{len(candidates) + 1}]: ").strip()
     try:
-        return candidates[int(choice) - 1]
-    except (ValueError, IndexError):
-        print("  Invalid choice — proceeding with a general search.")
+        idx = int(choice)
+    except ValueError:
+        print("  Invalid choice.")
         return None
+
+    if idx == len(candidates) + 1:
+        company = input("  Company / school: ").strip()
+        if not company:
+            print("  Company/school is required.")
+            return None
+        full = input(f"  Confirm full name [{name}]: ").strip() or name
+        return {"name": full, "company": company}
+
+    if 1 <= idx <= len(candidates):
+        picked = candidates[idx - 1]
+        print(f"\n  Selected: {picked.get('name')} @ {picked.get('company') or '(unknown)'}")
+        return picked
+
+    print("  Invalid choice.")
+    return None
+
+
+def collect_sparse_hints(name: str, company: Optional[str]) -> dict:
+    """When public research is thin, ask the searcher what they already know."""
+    from sparse_profile import sparse_recovery_suggestions
+
+    print("\n--- Thin public footprint ---")
+    print(f"  We found little verified public detail on {name}" + (f" @ {company}" if company else "") + ".")
+    print("  Overlap still runs, but conversation ideas get much better with anything you know.")
+    for tip in sparse_recovery_suggestions(name, company):
+        print(f"  • {tip}")
+    print("\n  Add whatever you have (press enter to skip a field):")
+    hints = {}
+    university = input("  University / school: ").strip()
+    if university:
+        hints["university"] = university
+    major = input("  Major / program: ").strip()
+    if major:
+        hints["major"] = major
+    year = input("  Graduation year / class: ").strip()
+    if year:
+        hints["graduation_year"] = year
+    linkedin = input("  LinkedIn URL: ").strip()
+    if linkedin:
+        hints["linkedin_url"] = linkedin
+    instagram = input("  Instagram handle: ").strip().lstrip("@")
+    if instagram:
+        hints["instagram_handle"] = instagram
+    github = input("  GitHub username: ").strip()
+    if github:
+        hints["github_username"] = github
+    notes = input("  Anything else you know (club, project, mutuals): ").strip()
+    if notes:
+        hints["notes"] = notes
+    return hints
 
 
 def run_search(
@@ -143,27 +203,91 @@ def run_search(
         if summary.get("status") != "ok":
             err = summary.get("error") or summary.get("reason") or summary.get("status")
             print(f"  summarize failed: {err}")
-            # Fall back to cached briefing so detailed common-ground can still run.
+            # Fall back to cached briefing so detailed conversation ideas can still run.
             cached_summary = (existing or {}).get("latest_summary")
             if isinstance(cached_summary, dict) and cached_summary.get("status") == "ok":
-                print("  reusing previous cached summary for common ground")
+                print("  reusing previous cached summary for conversation ideas")
                 summary = cached_summary
             else:
-                print("  no usable cached summary — common ground may be skipped")
+                print("  no usable cached summary — conversation ideas may be skipped")
 
     cached_sources = (existing or {}).get("latest_sources", {})
     all_sources = {**cached_sources, **raw_results}
 
+    from sparse_profile import briefing_density, sparse_recovery_suggestions
+
+    density = briefing_density(summary) if summary.get("status") == "ok" else "sparse"
+    print(f"\n  briefing density: {density}")
+
+    them_hints: dict = {}
+    if summary.get("status") == "ok" and density == "sparse":
+        them_hints = collect_sparse_hints(name, company)
+        # Apply unlocks: LinkedIn / university / github / social handle
+        if them_hints.get("linkedin_url") and not linkedin_url:
+            linkedin_url = them_hints["linkedin_url"]
+            print(f"  [sparse] using provided LinkedIn: {linkedin_url}")
+            from connectors import linkedin_public as li
+
+            li_result = li.fetch_linkedin_public(linkedin_url)
+            raw_results["linkedin_public"] = li_result
+            all_sources["linkedin_public"] = li_result
+            print(f"  [linkedin_public] {li_result.get('status')}")
+        if them_hints.get("university") and not university:
+            university = them_hints["university"]
+        if them_hints.get("github_username") and not github_username:
+            github_username = them_hints["github_username"]
+            from connectors import github as gh
+
+            print(f"  [sparse] fetching GitHub @{github_username}…")
+            gh_result = gh.search_github(name=name, username=github_username, company=company)
+            raw_results["github"] = gh_result
+            all_sources["github"] = gh_result
+            print(f"  [github] {gh_result.get('status')}")
+        if them_hints.get("instagram_handle"):
+            from connectors import instagram as ig
+
+            handle = them_hints["instagram_handle"]
+            print(f"  [sparse] fetching Instagram @{handle}…")
+            ig_result = ig.fetch_instagram(
+                name=name,
+                company=company,
+                university=university,
+                place=place,
+                instagram_url=f"https://www.instagram.com/{handle}/",
+            )
+            raw_results["instagram_public"] = ig_result
+            all_sources["instagram_public"] = ig_result
+            print(f"  [instagram_public] {ig_result.get('status')}")
+        # Fold supplied facts into summary personal notes for the LLM
+        personal = dict(summary.get("personal_info") or {})
+        notes = list(personal.get("personal_notes") or [])
+        notes.append("Searcher-supplied facts: " + json.dumps(them_hints))
+        personal["personal_notes"] = notes
+        summary["personal_info"] = personal
+        # Re-summarize lightly if we unlocked new sources
+        if any(
+            raw_results.get(k, {}).get("status") == "ok"
+            for k in ("linkedin_public", "github", "instagram_public")
+        ):
+            print("  [sparse] re-summarizing with unlocked sources…")
+            llm_view = copy.deepcopy(merged)
+            llm_view["sources"] = all_sources
+            refreshed = summarize_profile(llm_view)
+            if refreshed.get("status") == "ok":
+                summary = refreshed
+                density = briefing_density(summary)
+                print(f"  [sparse] density after unlock: {density}")
+
     overlap = None
     usage = {"tier": "basic", "tokens_charged": TOKEN_COST_BASIC}
     if tier == "detailed" and summary.get("status") == "ok":
-        print("\nFinding common ground with your profile "
+        print("\nBuilding conversation ideas from your profile "
               f"({default_path().name})...")
         try:
             user = load_user_profile()
             print(f"  you: {user.get('name') or '(unnamed)'}")
-            if (user.get("crm") or {}).get("source") == "research_dump":
-                print("  (normalized research dump → YOU profile)")
+            if (user.get("crm") or {}).get("source") in ("research_dump", "researched_at_signup"):
+                print("  (researched YOU profile)")
         except Exception as exc:
             user = None
             print(f"  (could not load user profile: {exc})")
@@ -172,25 +296,31 @@ def run_search(
             them_name=name,
             user_profile=user,
             them_sources=all_sources,
+            them_hints=them_hints or None,
+            verbose=True,
         )
         if overlap.get("status") == "ok":
             summary = apply_overlap_to_summary(summary, overlap)
             usage = {
                 "tier": "detailed",
                 "tokens_charged": TOKEN_COST_DETAILED,
-                "overlap_score": overlap.get("overlap_score"),
             }
-            print(f"  overlap score: {overlap.get('overlap_score')}")
+            n_topics = len(overlap.get("talk_about") or [])
+            print(f"  talk topics ready: {n_topics}")
         else:
             detail = overlap.get("reason") or overlap.get("error") or overlap.get("status")
-            print(f"  common ground skipped/failed: {detail}")
+            print(f"  conversation ideas skipped/failed: {detail}")
             usage["note"] = detail
+            if density == "sparse":
+                print("  tips:")
+                for tip in sparse_recovery_suggestions(name, company):
+                    print(f"    • {tip}")
     elif tier == "detailed":
         reason = summary.get("error") or summary.get("reason") or "summary not ok"
-        print(f"\nSkipping common ground — need a usable person summary first ({reason}).")
+        print(f"\nSkipping conversation ideas — need a usable person summary first ({reason}).")
         overlap = {"status": "skipped", "reason": f"person summary unavailable: {reason}"}
     elif tier == "basic":
-        print("\nSkipping common ground (--tier basic). Icebreakers stay empty until detailed.")
+        print("\nSkipping conversation ideas (--tier basic).")
 
     path = store.save(
         name,
@@ -207,7 +337,6 @@ def run_search(
             "type": "research",
             "tier": usage.get("tier"),
             "tokens_charged": usage.get("tokens_charged"),
-            "overlap_score": usage.get("overlap_score"),
             "at": datetime.now(timezone.utc).isoformat(),
         },
     )
@@ -227,13 +356,17 @@ def run_search(
             "common_ground",
             "conversation_starters",
             "deep_dive_questions",
+            "conversation",
+            "_conversation_engine",
+            "common_ground",
         )
     }
     print(json.dumps(core, indent=2))
-    _print_common_ground(summary.get("common_ground") or overlap)
+    conv = summary.get("conversation") or public_conversation(overlap)
+    _print_conversation(conv)
     _print_questions(
-        summary.get("conversation_starters"),
-        summary.get("deep_dive_questions"),
+        conv.get("openers") or summary.get("conversation_starters"),
+        conv.get("deep_questions") or summary.get("deep_dive_questions"),
     )
     _print_personal_info(
         summary.get("personal_info"),
@@ -247,77 +380,64 @@ def run_search(
     _print_senior_connections(summary.get("senior_connections"))
 
 
-def _print_common_ground(section) -> None:
-    print("\n=== Common ground (you ↔ them) ===")
+def _print_conversation(section) -> None:
+    print("\n=== Things to talk about ===")
     if not isinstance(section, dict):
-        print("  (not computed — summary may have failed, or --tier was not detailed)")
+        print("  (not computed — run --tier detailed)")
         return
     if section.get("status") and section.get("status") != "ok":
         detail = section.get("reason") or section.get("error") or section.get("status")
         print(f"  status: {detail}")
         return
 
-    score = section.get("overlap_score")
-    you = section.get("you_name")
-    if you:
-        print(f"  you: {you}")
-    if score is not None:
-        print(f"  overlap score: {score}/100")
-    summary = section.get("overlap_summary")
-    if summary:
-        print(f"  {summary}")
+    brief = section.get("conversation_brief")
+    if brief:
+        print(f"  {brief}")
 
-    grounds = section.get("common_grounds") or []
-    if grounds:
-        print("\n  Shared / closely related points:")
-        for item in grounds:
-            if not isinstance(item, dict):
-                print(f"    • {item}")
-                continue
-            point = item.get("point") or "(untitled)"
-            strength = item.get("strength") or ""
-            tag = f" [{strength}]" if strength else ""
-            print(f"    • {point}{tag}")
-            if item.get("you_side"):
-                print(f"        you:  {item['you_side']}")
-            if item.get("them_side"):
-                print(f"        them: {item['them_side']}")
-            if item.get("why_it_matters"):
-                print(f"        why:  {item['why_it_matters']}")
-    else:
-        print("\n  Shared points: (none found from current profiles)")
-
-    topics = section.get("related_topics_to_discuss") or []
+    topics = section.get("talk_about") or []
     if topics:
-        print("\n  Related topics to discuss:")
-        for topic in topics:
+        print("\n  Topics:")
+        for item in topics:
+            if isinstance(item, dict):
+                print(f"    • {item.get('topic') or '(untitled)'}")
+                if item.get("hook"):
+                    print(f"        {item['hook']}")
+            else:
+                print(f"    • {item}")
+    else:
+        print("\n  Topics: (none)")
+
+    related = section.get("related_topics") or []
+    if related:
+        print("\n  Related threads:")
+        for topic in related:
             print(f"    • {topic}")
 
-    angle = section.get("outreach_angle")
+    angle = section.get("message_angle")
     if angle:
-        print(f"\n  Outreach angle: {angle}")
+        print(f"\n  Message angle: {angle}")
 
-    gaps = section.get("your_profile_gaps") or []
-    if gaps:
-        print("\n  Improve your profile for better overlap next time:")
-        for gap in gaps:
-            print(f"    • {gap}")
+    needs = section.get("needs_more_info") or []
+    if needs:
+        print("\n  To unlock better topics, get:")
+        for item in needs:
+            print(f"    • {item}")
 
 
 def _print_questions(starters, deep_dives) -> None:
-    print("\n=== Conversation starters (from common ground) ===")
+    print("\n=== Openers ===")
     if starters:
         for q in starters:
             print(f"  • {q}")
     else:
-        print("  (none — run --tier detailed after filling user_profile.json)")
+        print("  (none — run --tier detailed)")
 
-    print("\n=== Deep-dive questions (from common ground) ===")
+    print("\n=== Deeper questions ===")
     if deep_dives:
         for q in deep_dives:
             print(f"  • {q}")
     else:
-        print("  (none — run --tier detailed after filling user_profile.json)")
+        print("  (none — run --tier detailed)")
 
 
 def _print_personal_info(section, raw_source=None) -> None:
@@ -573,7 +693,7 @@ def main() -> None:
         default="detailed",
         help=(
             "basic = research briefing only (1 token); "
-            "detailed = research + common-ground overlap & questions (3 tokens). "
+            "detailed = research + conversation ideas & questions (3 tokens). "
             "Default: detailed."
         ),
     )
@@ -599,16 +719,26 @@ def main() -> None:
 
     company, university, place, linkedin_url = args.company, args.university, args.place, args.linkedin_url
 
-    # If any hint was already given directly, the person is already disambiguated —
-    # don't make them pick from a candidate list too.
-    already_disambiguated = any([company, university, place, linkedin_url])
-    if not already_disambiguated:
+    # Always disambiguate unless LinkedIn URL uniquely pins the person.
+    # Company alone still benefits from confirming full name + company.
+    if args.linkedin:
+        print(f"\nUsing LinkedIn URL — skipping candidate picker.")
+    else:
         candidate = choose_candidate(name)
-        if candidate:
-            name = candidate.get("name") or name
-            company = candidate.get("company")
-            place = candidate.get("location")
-            linkedin_url = candidate.get("linkedin_url")
+        if not candidate:
+            print("No person selected — exiting.")
+            sys.exit(1)
+        name = candidate.get("name") or name
+        company = candidate.get("company") or company
+        place = candidate.get("location") or place
+        linkedin_url = candidate.get("linkedin_url") or linkedin_url
+        university = university or candidate.get("university")
+
+    if not company and not linkedin_url:
+        print("A company/school (or LinkedIn URL) is required after choosing a person.")
+        sys.exit(1)
+
+    print(f"\n>>> Deep dive + detailed overlap on: {name} @ {company or linkedin_url}")
 
     run_search(
         name,

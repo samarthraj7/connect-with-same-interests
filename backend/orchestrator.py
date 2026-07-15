@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import FrozenSet, Optional
 
 from connectors import (
+    apollo,
     exa_search,
     facebook,
     gemini_search,
@@ -11,6 +12,7 @@ from connectors import (
     linkedin_public,
     patents,
     personal_info,
+    public_web,
     twitter,
 )
 
@@ -23,25 +25,45 @@ class PersonQuery:
     place: Optional[str] = None
     github_username: Optional[str] = None
     linkedin_url: Optional[str] = None
+    email: Optional[str] = None
+    domain: Optional[str] = None
 
 
 class SearchOrchestrator:
-    """Fans out to every connector not in `skip`, in two waves.
+    """Fans out to connectors not in `skip`.
 
-    Wave 1: github, patents, gemini_search, exa_search, personal_info.
-    Wave 2a: linkedin_public (needs discovered LinkedIn URL).
-    Wave 2b: Instagram / Facebook / Twitter — opt-in only (pass them in
-    ``skip`` to leave them off). Each does Google + ScrapeCreators when run.
+    Priority: Apollo (licensed) → GitHub / patents → Gemini/Exa / personal_info /
+    public_web (portfolios & open Google-indexable pages) → optional LinkedIn public
+    → opt-in social scrapers (once).
     """
 
     def run(self, query: PersonQuery, skip: FrozenSet[str] = frozenset()) -> dict:
         results = {}
 
-        with ThreadPoolExecutor(max_workers=5) as pool:
+        # Wave 0 — licensed enrichment first
+        if "apollo" not in skip:
+            results["apollo"] = apollo.enrich_person(
+                name=query.name,
+                company=query.company,
+                domain=query.domain,
+                linkedin_url=query.linkedin_url,
+                email=query.email,
+            )
+            # Prefer Apollo LinkedIn URL for later waves
+            if results["apollo"].get("status") == "ok" and results["apollo"].get("linkedin_url"):
+                if not query.linkedin_url:
+                    query.linkedin_url = results["apollo"]["linkedin_url"]
+
+        with ThreadPoolExecutor(max_workers=6) as pool:
             futures = {}
+            if query.linkedin_url:
+                print(f"  [orchestrator] identity lock linkedin={query.linkedin_url}", flush=True)
             if "github" not in skip:
                 futures["github"] = pool.submit(
-                    github.search_github, name=query.name, username=query.github_username, company=query.company
+                    github.search_github,
+                    name=query.name,
+                    username=query.github_username,
+                    company=query.company,
                 )
             if "patents" not in skip:
                 futures["patents"] = pool.submit(patents.search_patents, name=query.name)
@@ -52,6 +74,7 @@ class SearchOrchestrator:
                     company=query.company,
                     university=query.university,
                     place=query.place,
+                    linkedin_url=query.linkedin_url,
                 )
             if "exa_search" not in skip:
                 futures["exa_search"] = pool.submit(
@@ -60,6 +83,7 @@ class SearchOrchestrator:
                     company=query.company,
                     university=query.university,
                     place=query.place,
+                    linkedin_url=query.linkedin_url,
                 )
             if "personal_info" not in skip:
                 futures["personal_info"] = pool.submit(
@@ -68,26 +92,41 @@ class SearchOrchestrator:
                     company=query.company,
                     university=query.university,
                     place=query.place,
+                    linkedin_url=query.linkedin_url,
+                )
+            if "public_web" not in skip:
+                futures["public_web"] = pool.submit(
+                    public_web.search_public_presence,
+                    name=query.name,
+                    company=query.company,
+                    university=query.university,
+                    linkedin_url=query.linkedin_url,
                 )
             for source, future in futures.items():
                 results[source] = future.result()
-
         gemini_result = results.get("gemini_search")
         exa_result = results.get("exa_search")
-        if gemini_result is None and exa_result is None:
+        apollo_result = results.get("apollo") or {}
+        if gemini_result is None and exa_result is None and apollo_result.get("status") != "ok":
             return results
 
         social_links = (gemini_result or {}).get("social_profile_links") or {}
-        linkedin_url = query.linkedin_url or (exa_result or {}).get("linkedin_url") or social_links.get("linkedin")
+        linkedin_url = (
+            query.linkedin_url
+            or apollo_result.get("linkedin_url")
+            or (exa_result or {}).get("linkedin_url")
+            or social_links.get("linkedin")
+        )
 
         if "linkedin_public" not in skip:
             results["linkedin_public"] = linkedin_public.fetch_linkedin_public(linkedin_url)
 
         linkedin_result = results.get("linkedin_public") or {}
         identity_hints = {
-            "current_role": (gemini_result or {}).get("current_role"),
+            "current_role": apollo_result.get("title")
+            or (gemini_result or {}).get("current_role"),
             "bio_summary": (gemini_result or {}).get("bio_summary"),
-            "linkedin_headline": linkedin_result.get("headline"),
+            "linkedin_headline": linkedin_result.get("headline") or apollo_result.get("headline"),
             "linkedin_about": linkedin_result.get("about"),
         }
 
@@ -120,7 +159,9 @@ class SearchOrchestrator:
                     company=query.company,
                     university=query.university,
                     place=query.place,
-                    twitter_url=social_links.get("twitter") or social_links.get("x"),
+                    twitter_url=social_links.get("twitter")
+                    or social_links.get("x")
+                    or apollo_result.get("twitter_url"),
                     identity_hints=identity_hints,
                 )
             for source, future in futures.items():

@@ -1,4 +1,4 @@
-"""File-backed user store (MVP). Swap for Postgres later."""
+"""File-backed user store with optional Supabase dual-write."""
 
 from __future__ import annotations
 
@@ -28,6 +28,16 @@ class UserStore:
     def _path(self, user_id: str) -> Path:
         return self.base_dir / f"{user_id}.json"
 
+    def _write(self, user: dict) -> dict:
+        self._path(user["id"]).write_text(json.dumps(user, indent=2))
+        try:
+            from db import upsert_user_row
+
+            upsert_user_row(user)
+        except Exception:
+            pass
+        return user
+
     def create(
         self,
         *,
@@ -56,10 +66,13 @@ class UserStore:
             ],
             "profile": profile,
             "interactions": [],
+            "connections": [],
+            "settings": {"theme": "light"},
+            "pending_facts": [],
             "created_at": now,
             "updated_at": now,
         }
-        self._path(user_id).write_text(json.dumps(user, indent=2))
+        self._write(user)
         index["email_to_id"][email] = user_id
         self._save_index(index)
         return user
@@ -90,8 +103,91 @@ class UserStore:
             profile["profile_refinement"] = refinement
             user["profile"] = profile
         user["updated_at"] = datetime.now(timezone.utc).isoformat()
-        self._path(user_id).write_text(json.dumps(user, indent=2))
-        return user
+        return self._write(user)
+
+    def replace_profile(self, user_id: str, profile: dict[str, Any]) -> dict:
+        """Overwrite the whole living YOU profile (e.g. after self-research)."""
+        user = self.get(user_id)
+        if not user:
+            raise KeyError(user_id)
+        user["profile"] = profile
+        user["updated_at"] = datetime.now(timezone.utc).isoformat()
+        return self._write(user)
+
+    def update_settings(self, user_id: str, settings_patch: dict[str, Any]) -> dict:
+        user = self.get(user_id)
+        if not user:
+            raise KeyError(user_id)
+        settings = dict(user.get("settings") or {})
+        settings.update(settings_patch)
+        user["settings"] = settings
+        user["updated_at"] = datetime.now(timezone.utc).isoformat()
+        return self._write(user)
+
+    def replace_connections(self, user_id: str, connections: list[dict]) -> dict:
+        user = self.get(user_id)
+        if not user:
+            raise KeyError(user_id)
+        user["connections"] = connections
+        user["connections_imported_at"] = datetime.now(timezone.utc).isoformat()
+        user["updated_at"] = user["connections_imported_at"]
+        written = self._write(user)
+        try:
+            from db import get_supabase
+
+            sb = get_supabase()
+            if sb:
+                sb.table("user_connections").delete().eq("user_id", user_id).execute()
+                rows = [
+                    {
+                        "user_id": user_id,
+                        "name": c.get("name"),
+                        "company": c.get("company"),
+                        "linkedin_url": c.get("linkedin_url"),
+                        "connected_on": c.get("connected_on"),
+                        "email": c.get("email"),
+                        "raw": c.get("raw") or {},
+                    }
+                    for c in connections
+                    if c.get("name")
+                ]
+                for i in range(0, len(rows), 200):
+                    sb.table("user_connections").insert(rows[i : i + 200]).execute()
+        except Exception as e:
+            print(f"[connections] supabase write skipped: {e}")
+        return written
+
+    def add_pending_fact(self, user_id: str, fact: dict) -> dict:
+        user = self.get(user_id)
+        if not user:
+            raise KeyError(user_id)
+        entry = {
+            "id": str(uuid.uuid4()),
+            "status": "pending",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            **fact,
+        }
+        user.setdefault("pending_facts", []).append(entry)
+        user["updated_at"] = entry["created_at"]
+        return self._write(user)
+
+    def update_pending_fact(
+        self, user_id: str, fact_id: str, status: str, evidence: Any = None
+    ) -> dict:
+        user = self.get(user_id)
+        if not user:
+            raise KeyError(user_id)
+        facts = user.get("pending_facts") or []
+        for f in facts:
+            if f.get("id") == fact_id:
+                f["status"] = status
+                if evidence is not None:
+                    f["evidence"] = evidence
+                f["updated_at"] = datetime.now(timezone.utc).isoformat()
+                break
+        user["pending_facts"] = facts
+        user["updated_at"] = datetime.now(timezone.utc).isoformat()
+        return self._write(user)
 
     def charge_tokens(self, user_id: str, amount: int, reason: str) -> dict:
         user = self.get(user_id)
@@ -111,8 +207,7 @@ class UserStore:
             }
         )
         user["updated_at"] = datetime.now(timezone.utc).isoformat()
-        self._path(user_id).write_text(json.dumps(user, indent=2))
-        return user
+        return self._write(user)
 
     def append_interaction(self, user_id: str, event: dict[str, Any]) -> dict:
         user = self.get(user_id)
@@ -121,5 +216,15 @@ class UserStore:
         entry = {"at": datetime.now(timezone.utc).isoformat(), **event}
         user.setdefault("interactions", []).append(entry)
         user["updated_at"] = entry["at"]
-        self._path(user_id).write_text(json.dumps(user, indent=2))
-        return user
+        return self._write(user)
+
+    def list_all(self) -> list[dict]:
+        users = []
+        for path in self.base_dir.glob("*.json"):
+            if path.name.startswith("_"):
+                continue
+            try:
+                users.append(json.loads(path.read_text()))
+            except json.JSONDecodeError:
+                continue
+        return users

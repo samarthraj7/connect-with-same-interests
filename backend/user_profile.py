@@ -110,10 +110,21 @@ def _from_research_profile(data: dict[str, Any]) -> dict[str, Any]:
         affiliations.insert(0, data["company"])
 
     contact = data.get("contact") if isinstance(data.get("contact"), dict) else {}
+    # Prefer query-selected LinkedIn (Find Me pick) over rediscovered URLs
+    try:
+        from identity_lock import normalize_linkedin_url
+
+        q_li = normalize_linkedin_url((data.get("query") or {}).get("linkedin_url"))
+        if q_li:
+            contact = {**contact, "linkedin_url": q_li}
+    except Exception:
+        pass
     if not contact.get("linkedin_url"):
         for key in ("exa_search", "gemini_search", "linkedin_public"):
             src = sources.get(key) or {}
             url = src.get("linkedin_url") or (src.get("profile") or {}).get("url")
+            if not url and key == "gemini_search":
+                url = (src.get("social_profile_links") or {}).get("linkedin")
             if url:
                 contact = {**contact, "linkedin_url": url}
                 break
@@ -153,7 +164,19 @@ def _from_research_profile(data: dict[str, Any]) -> dict[str, Any]:
         },
         "summary_blurb": (summary.get("summary") or gemini.get("bio_summary") or "")[:1200],
         "notable_points": _cap_list(summary.get("notable_points") or [], 10),
+        # Keep rich briefing sections so My Profile can render the full dossier
+        "latest_summary": summary if summary.get("status") == "ok" or summary.get("summary") else None,
+        "public_presence": summary.get("public_presence") if isinstance(summary.get("public_presence"), dict) else {},
+        "senior_connections": _cap_list(summary.get("senior_connections") or [], 12),
+        "research_collaborators": _cap_list(summary.get("research_collaborators") or [], 12),
+        "awards_and_recognitions": _cap_list(summary.get("awards_and_recognitions") or [], 10),
+        "identity_confidence": summary.get("identity_confidence"),
+        "identity_notes": summary.get("identity_notes") or "",
+        "personal_info": personal if isinstance(personal, dict) else {},
     }
+    # Drop empty latest_summary placeholder
+    if not out.get("latest_summary"):
+        out.pop("latest_summary", None)
     return out
 
 
@@ -175,6 +198,81 @@ def _cap_list(items: Any, limit: int) -> list:
     return out
 
 
+def profile_from_research(
+    *,
+    name: str,
+    company: Optional[str],
+    summary: dict[str, Any],
+    sources: Optional[dict[str, Any]] = None,
+    contact: Optional[dict[str, Any]] = None,
+    linkedin_url: Optional[str] = None,
+) -> dict[str, Any]:
+    """Build a YOU profile from a research summary (signup self-research)."""
+    contact_out = dict(contact or {})
+    if linkedin_url:
+        try:
+            from identity_lock import normalize_linkedin_url
+
+            li = normalize_linkedin_url(linkedin_url)
+            if li:
+                contact_out["linkedin_url"] = li
+        except Exception:
+            contact_out["linkedin_url"] = linkedin_url
+    dump = {
+        "name": name,
+        "company": company,
+        "latest_summary": summary,
+        "latest_sources": sources or {},
+        "contact": contact_out,
+        "query": {"name": name, "company": company, "linkedin_url": linkedin_url or contact_out.get("linkedin_url")},
+    }
+    flat = _from_research_profile(dump)
+    flat["crm"] = {
+        "notes": "Built from public research at signup.",
+        "source": "researched_at_signup",
+    }
+    flat["profile_source"] = "researched_at_signup"
+    flat["researched_at"] = None  # filled by caller
+    return flat
+
+
+def merge_manual_overlays(base: dict[str, Any], overlays: dict[str, Any]) -> dict[str, Any]:
+    """Layer optional signup extras onto a researched profile without wiping research."""
+    out = dict(base)
+    # Scalar overlays only if research left them empty
+    for key in ("headline", "location", "hometown_or_raised", "current_company"):
+        if overlays.get(key) and not out.get(key):
+            out[key] = overlays[key]
+    # List fields: append unique manual items (user-supplied hobbies etc.)
+    for key in (
+        "hobbies",
+        "interests",
+        "sports",
+        "education",
+        "career_highlights",
+        "causes_and_affiliations",
+        "talking_goals",
+        "avoid_topics",
+    ):
+        manual = overlays.get(key) or []
+        if not isinstance(manual, list):
+            continue
+        existing = list(out.get(key) or [])
+        for item in manual:
+            if item and item not in existing:
+                existing.append(item)
+        if existing:
+            out[key] = existing
+    # Contact merge
+    base_contact = dict(out.get("contact") or {})
+    over_contact = overlays.get("contact") if isinstance(overlays.get("contact"), dict) else {}
+    for k, v in over_contact.items():
+        if v and not base_contact.get(k):
+            base_contact[k] = v
+    out["contact"] = base_contact
+    return out
+
+
 def profile_for_overlap(profile: dict[str, Any]) -> dict[str, Any]:
     """Strip CRM/meta noise; keep only fields useful for overlap reasoning."""
     # Ensure research dumps are normalized even if caller bypassed load_user_profile.
@@ -182,6 +280,18 @@ def profile_for_overlap(profile: dict[str, Any]) -> dict[str, Any]:
         profile = _from_research_profile(profile)
 
     slim = {k: profile.get(k) for k in _OVERLAP_KEYS if profile.get(k) not in (None, "", [])}
+    # Always surface hobbies/sports/interests even if empty lists were filtered —
+    # caller's signup_form may nest them under contact or signup_form.
+    signup = profile.get("signup_form") if isinstance(profile.get("signup_form"), dict) else {}
+    for key in ("hobbies", "interests", "sports"):
+        vals = list(slim.get(key) or profile.get(key) or signup.get(key) or [])
+        # de-dupe
+        out = []
+        for v in vals:
+            if v and v not in out:
+                out.append(v)
+        if out:
+            slim[key] = out
     # Extra signal from normalized research dumps
     for extra in ("summary_blurb", "notable_points"):
         if profile.get(extra):

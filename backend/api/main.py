@@ -23,11 +23,13 @@ from common_ground import (
     TOKEN_COST_DETAILED,
     analyze_common_ground,
     apply_overlap_to_summary,
+    public_conversation,
 )
 from merge import merge_profile
 from orchestrator import PersonQuery, SearchOrchestrator
 from storage import SOCIAL_SOURCES, ProfileStore
 from synthesize import summarize_profile
+from user_profile import merge_manual_overlays, profile_from_research
 
 load_dotenv()
 
@@ -55,8 +57,19 @@ class SignupBody(BaseModel):
     email: str
     password: str = Field(min_length=6)
     name: str
+    company: str = ""
+    university: str = ""
+    place: str = ""
     headline: str = ""
     location: str = ""
+    linkedin_url: str = ""
+    phone: str = ""
+    instagram_handle: str = ""
+    twitter_handle: str = ""
+    facebook_url: str = ""
+    github_username: str = ""
+    website: str = ""
+    # Optional extras layered onto the researched profile
     hobbies: list[str] = []
     interests: list[str] = []
     sports: list[str] = []
@@ -64,7 +77,23 @@ class SignupBody(BaseModel):
     career_highlights: list[str] = []
     causes_and_affiliations: list[str] = []
     talking_goals: list[str] = []
-    linkedin_url: str = ""
+    research_me: bool = True
+
+
+class ResearchFeedbackBody(BaseModel):
+    draft_id: str
+    rating: Literal["good", "bad"]
+    wrong_notes: Optional[str] = None
+    wrong_categories: Optional[list[str]] = None
+
+
+class SelfResearchBody(BaseModel):
+    company: Optional[str] = None
+    university: Optional[str] = None
+    place: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    force_refresh: bool = True
+    auto_commit: bool = False
 
 
 class LoginBody(BaseModel):
@@ -98,6 +127,8 @@ class ResearchBody(BaseModel):
     tier: Literal["basic", "detailed"] = "detailed"
     fetch_social: bool = False
     force_refresh: bool = False
+    # When false (default), result is a draft until POST /research/feedback rates it good.
+    auto_commit: bool = False
 
 
 class InteractionBody(BaseModel):
@@ -108,6 +139,59 @@ class InteractionBody(BaseModel):
 
 class CandidatesBody(BaseModel):
     name: str
+    company: Optional[str] = None
+    university: Optional[str] = None
+    linkedin_url: Optional[str] = None
+
+
+class JournalEntryBody(BaseModel):
+    body: str
+    entry_type: str = "note"
+    tags: list[str] = []
+
+
+class VerifyHandlesBody(BaseModel):
+    name: str
+    company: Optional[str] = None
+    university: Optional[str] = None
+    handles: dict[str, str] = {}
+
+
+class ConnectionsUploadBody(BaseModel):
+    csv: str
+    filename: str = "connections.csv"
+
+
+class SettingsBody(BaseModel):
+    theme: Optional[str] = None
+    auto_prep: Optional[bool] = None
+
+
+class PendingFactBody(BaseModel):
+    claim: str
+    person_name: Optional[str] = None
+    person_company: Optional[str] = None
+    trusted_personal: bool = False
+
+
+class PendingFactUpdateBody(BaseModel):
+    status: Literal["pending", "corroborated", "trusted_personal", "rejected"]
+    evidence: Optional[dict[str, Any]] = None
+
+
+class CalendarOAuthBody(BaseModel):
+    code: str
+    redirect_uri: str
+
+
+class OtpSendBody(BaseModel):
+    channel: Literal["email", "phone"]
+    destination: Optional[str] = None
+
+
+class OtpVerifyBody(BaseModel):
+    channel: Literal["email", "phone"]
+    code: str
 
 
 # ─── auth ───────────────────────────────────────────────────────────────────
@@ -117,10 +201,30 @@ class CandidatesBody(BaseModel):
 def signup(body: SignupBody):
     if users.find_by_email(body.email):
         raise HTTPException(400, "Email already registered")
-    profile = {
-        "name": body.name.strip(),
+
+    email = body.email.strip().lower()
+    name = body.name.strip()
+    company = (body.company or "").strip() or None
+    university = (body.university or "").strip() or None
+    place = (body.place or body.location or "").strip() or None
+    linkedin_url = (body.linkedin_url or "").strip() or None
+    if body.research_me and not (company or university or linkedin_url):
+        raise HTTPException(
+            400,
+            "Company, university, or LinkedIn URL required to research you.",
+        )
+    instagram = (body.instagram_handle or "").strip().lstrip("@")
+    twitter = (body.twitter_handle or "").strip().lstrip("@")
+    github = (body.github_username or "").strip()
+    facebook = (body.facebook_url or "").strip()
+    phone = (body.phone or "").strip()
+    website = (body.website or "").strip()
+
+    seed = {
+        "name": name,
         "headline": body.headline.strip(),
-        "location": body.location.strip(),
+        "location": (body.location or body.place or "").strip(),
+        "current_company": (body.company or "").strip(),
         "hobbies": _clean_list(body.hobbies),
         "interests": _clean_list(body.interests),
         "sports": _clean_list(body.sports),
@@ -134,21 +238,426 @@ def signup(body: SignupBody):
         ],
         "avoid_topics": [],
         "contact": {
-            "email": body.email.strip().lower(),
-            "linkedin_url": body.linkedin_url.strip(),
-            "phone": "",
+            "email": email,
+            "phone": phone,
+            "linkedin_url": linkedin_url or "",
+            "instagram_handle": instagram,
+            "twitter_handle": twitter,
+            "facebook_url": facebook,
+            "github_username": github,
+            "website": website,
         },
-        # Signup hobbies/interests are first-class social signal for overlap.
-        "social_from_signup": True,
+        "signup_form": {
+            "company": company,
+            "university": university,
+            "place": place,
+            "headline": body.headline.strip(),
+            "location": (body.location or body.place or "").strip(),
+            "hobbies": _clean_list(body.hobbies),
+            "interests": _clean_list(body.interests),
+            "sports": _clean_list(body.sports),
+            "socials": {
+                "linkedin_url": linkedin_url,
+                "instagram_handle": instagram,
+                "twitter_handle": twitter,
+                "facebook_url": facebook,
+                "github_username": github,
+                "website": website,
+                "phone": phone,
+            },
+        },
+        "profile_source": "signup_seed",
+        "research_status": "pending" if body.research_me else "skipped",
     }
+
+    print(f"\n[signup] creating account for {email} ({name})")
+    # Verify optional socials once — only when this request also researches YOU
+    # (modal signup verifies once client-side then research_me=false).
+    handle_verification: dict[str, Any] = {}
+    handles_to_check = {}
+    if body.research_me:
+        if github:
+            handles_to_check["github"] = github
+        if linkedin_url:
+            handles_to_check["linkedin"] = linkedin_url
+        if instagram:
+            handles_to_check["instagram"] = instagram
+        if twitter:
+            handles_to_check["twitter"] = twitter
+    if handles_to_check:
+        from handle_verify import verify_handles
+
+        try:
+            vr = verify_handles(
+                name=name,
+                company=company,
+                university=university,
+                handles=handles_to_check,
+            )
+            handle_verification = vr.get("results") or {}
+            seed["handle_verification"] = handle_verification
+            # Only feed verified (or ambiguous LinkedIn URL) into enrichment
+            if handle_verification.get("github", {}).get("status") == "rejected":
+                github = ""
+                seed["contact"]["github_username"] = ""
+            if handle_verification.get("instagram", {}).get("status") == "rejected":
+                instagram = ""
+                seed["contact"]["instagram_handle"] = ""
+            if handle_verification.get("twitter", {}).get("status") == "rejected":
+                twitter = ""
+                seed["contact"]["twitter_handle"] = ""
+        except Exception as e:
+            print(f"[signup] handle verify skipped: {e}")
+
     user = users.create(
-        email=body.email.strip().lower(),
+        email=email,
         password_hash=hash_password(body.password),
-        profile=profile,
+        profile=seed,
         starting_tokens=int(os.environ.get("STARTING_TOKENS", "15")),
     )
+    print(f"[signup] saved user JSON → users/{user['id']}.json")
+
+    research_meta: dict[str, Any] = {"attempted": False}
+    if body.research_me:
+        research_meta["attempted"] = True
+        fetch_social = bool(instagram or twitter or facebook)
+        print(
+            f"[signup] researching YOU publicly "
+            f"(company={company}, university={university}, social={fetch_social})…"
+        )
+        briefing = _fetch_person_briefing(
+            name=name,
+            company=company,
+            university=university,
+            place=place,
+            linkedin_url=linkedin_url,
+            fetch_social=fetch_social,
+            force_refresh=True,
+            github_username=github or None,
+            instagram_handle=instagram or None,
+            twitter_handle=twitter or None,
+            facebook_url=facebook or None,
+        )
+        research_meta["status"] = briefing.get("status")
+        if briefing.get("status") == "ok":
+            researched = profile_from_research(
+                name=name,
+                company=company,
+                summary=briefing["summary"],
+                sources=briefing.get("sources") or {},
+                contact=seed["contact"],
+                linkedin_url=linkedin_url,
+            )
+            researched["researched_at"] = datetime.now(timezone.utc).isoformat()
+            researched["research_status"] = "ok"
+            researched["self_profile_slug"] = briefing.get("profile_slug")
+            researched["signup_form"] = seed["signup_form"]
+            merged = merge_manual_overlays(researched, seed)
+            contact = dict(merged.get("contact") or {})
+            contact.update({k: v for k, v in seed["contact"].items() if v})
+            merged["contact"] = contact
+            user = users.replace_profile(user["id"], merged)
+            research_meta["profile_slug"] = briefing.get("profile_slug")
+            print(f"[signup] self-research OK → profile slug {briefing.get('profile_slug')}")
+        else:
+            seed["research_status"] = "failed"
+            seed["research_error"] = briefing.get("error") or briefing.get("reason")
+            user = users.replace_profile(user["id"], seed)
+            research_meta["error"] = seed.get("research_error")
+            print(f"[signup] self-research failed: {research_meta['error']}")
+
     token = create_token(user["id"], user["email"])
-    return {"token": token, "user": _public_user(user)}
+    return {
+        "token": token,
+        "user": _public_user(user),
+        "self_research": research_meta,
+    }
+
+
+@app.post("/me/research")
+def research_me(body: SelfResearchBody, user=Depends(require_user)):
+    """Re-run public research on the signed-in user. Defaults to draft until rated good."""
+    profile = user.get("profile") or {}
+    name = profile.get("name") or ""
+    if not name:
+        raise HTTPException(400, "Your profile needs a name before we can research you")
+
+    company = (body.company or profile.get("current_company") or "").strip() or None
+    university = (body.university or "").strip() or None
+    place = (body.place or profile.get("location") or "").strip() or None
+    linkedin_url = (
+        body.linkedin_url
+        or (profile.get("contact") or {}).get("linkedin_url")
+        or ""
+    ).strip() or None
+
+    briefing = _fetch_person_briefing(
+        name=name,
+        company=company,
+        university=university,
+        place=place,
+        linkedin_url=linkedin_url,
+        fetch_social=False,
+        force_refresh=body.force_refresh,
+        persist=body.auto_commit,
+        user_id=user["id"],
+    )
+
+    if briefing.get("status") != "ok":
+        err = briefing.get("error") or "Self-research failed"
+        # Keep UI honest: signup uses research_me=false, so status stays "skipped"
+        # unless we mark the failure here after /me/research.
+        try:
+            failed_profile = dict(user.get("profile") or {})
+            failed_profile["research_status"] = "failed"
+            failed_profile["research_error"] = err
+            users.replace_profile(user["id"], failed_profile)
+        except Exception:
+            pass
+        raise HTTPException(502, err)
+
+    if briefing.get("needs_rating") and briefing.get("draft_id"):
+        pending_profile = dict(user.get("profile") or {})
+        pending_profile["research_status"] = "pending_rating"
+        pending_profile["research_draft_id"] = briefing["draft_id"]
+        user = users.replace_profile(user["id"], pending_profile)
+        return {
+            "status": "ok",
+            "needs_rating": True,
+            "draft_id": briefing["draft_id"],
+            "summary": _public_summary(briefing.get("summary") or {}),
+            "user": _public_user(user),
+            "name": name,
+            "company": company,
+        }
+
+    researched = profile_from_research(
+        name=name,
+        company=company,
+        summary=briefing["summary"],
+        sources=briefing.get("sources") or {},
+        contact=profile.get("contact") or {},
+        linkedin_url=linkedin_url,
+    )
+    researched["researched_at"] = datetime.now(timezone.utc).isoformat()
+    researched["research_status"] = "ok"
+    researched["self_profile_slug"] = briefing.get("profile_slug")
+    researched["profile_source"] = "claimed_public"
+    merged = merge_manual_overlays(researched, profile)
+    user = users.replace_profile(user["id"], merged)
+
+    if briefing.get("profile_slug"):
+        rec = profiles.load(name, company) or {}
+        if rec:
+            rec["claimed_user_id"] = user["id"]
+            rec["visibility"] = "public"
+            if university:
+                rec["university"] = university
+            profiles.path_for(name, company).write_text(
+                __import__("json").dumps(rec, indent=2)
+            )
+
+    return {
+        "status": "ok",
+        "needs_rating": False,
+        "draft_id": None,
+        "user": _public_user(user),
+        "profile_slug": briefing.get("profile_slug"),
+        "summary": _public_summary(briefing.get("summary") or {}),
+        "visibility": {"public_dossier": True, "private_journal": True},
+    }
+
+
+@app.get("/research/drafts/{draft_id}")
+def get_research_draft(draft_id: str, user=Depends(require_user)):
+    from research_drafts import load_draft
+
+    draft = load_draft(draft_id)
+    if not draft:
+        raise HTTPException(404, "Draft not found or expired")
+    if draft.get("user_id") and draft["user_id"] != user["id"]:
+        raise HTTPException(403, "Not your draft")
+    return {
+        "status": "ok",
+        "draft_id": draft_id,
+        "needs_rating": True,
+        "name": draft.get("name"),
+        "company": draft.get("company"),
+        "university": draft.get("university"),
+        "linkedin_url": draft.get("linkedin_url"),
+        "contact": (
+            {"linkedin_url": draft["linkedin_url"]}
+            if draft.get("linkedin_url")
+            else {}
+        ),
+        "summary": _public_summary(draft.get("summary") or {}),
+        "conversation": draft.get("conversation") or {"status": "skipped"},
+        "mutuals": draft.get("mutuals") or [],
+        "in_your_network": draft.get("in_your_network"),
+        "usage": draft.get("usage"),
+        "sources": {
+            "exa_search": {
+                "linkedin_url": (
+                    (draft.get("all_sources") or {}).get("exa_search") or {}
+                ).get("linkedin_url")
+                or draft.get("linkedin_url"),
+                "status": ((draft.get("all_sources") or {}).get("exa_search") or {}).get("status"),
+            }
+            if (draft.get("all_sources") or {}).get("exa_search") or draft.get("linkedin_url")
+            else None,
+            "gemini_search": {
+                "linkedin_url": (
+                    ((draft.get("all_sources") or {}).get("gemini_search") or {}).get(
+                        "social_profile_links"
+                    )
+                    or {}
+                ).get("linkedin")
+                or ((draft.get("all_sources") or {}).get("gemini_search") or {}).get("linkedin_url")
+                or draft.get("linkedin_url"),
+                "status": ((draft.get("all_sources") or {}).get("gemini_search") or {}).get("status"),
+            }
+            if (draft.get("all_sources") or {}).get("gemini_search") or draft.get("linkedin_url")
+            else None,
+        },
+    }
+
+
+@app.post("/research/feedback")
+def research_feedback(body: ResearchFeedbackBody, user=Depends(require_user)):
+    """Rate a research draft. good → commit to people DB; bad → discard + store corrections."""
+    from research_drafts import delete_draft, load_draft
+    from research_feedback import record_feedback
+    from people_lookup import public_dossier_from_record
+
+    draft = load_draft(body.draft_id)
+    if not draft:
+        raise HTTPException(404, "Draft not found or expired — run research again")
+    if draft.get("user_id") and draft["user_id"] != user["id"]:
+        raise HTTPException(403, "Not your draft")
+
+    name = draft.get("name") or ""
+    company = draft.get("company")
+    university = draft.get("university")
+    linkedin_url = draft.get("linkedin_url")
+    summary = draft.get("summary") or {}
+    merged = draft.get("merged") or {}
+    overlap = draft.get("common_ground")
+    usage = draft.get("usage") or {}
+    all_sources = draft.get("all_sources") or draft.get("raw_results") or {}
+
+    if body.rating == "bad":
+        record_feedback(
+            user_id=user["id"],
+            rating="bad",
+            name=name,
+            company=company,
+            university=university,
+            linkedin_url=linkedin_url,
+            draft_id=body.draft_id,
+            wrong_notes=body.wrong_notes,
+            wrong_categories=body.wrong_categories,
+            briefing_snapshot=_public_summary(summary) if isinstance(summary, dict) else None,
+        )
+        delete_draft(body.draft_id)
+        # Self-research: clear pending draft markers on YOU profile
+        if draft.get("kind") == "self_research" or draft.get("tier") == "self":
+            failed_profile = dict(user.get("profile") or {})
+            failed_profile["research_status"] = "discarded"
+            failed_profile.pop("research_draft_id", None)
+            failed_profile["research_error"] = (body.wrong_notes or "Rated bad")[:500]
+            user = users.replace_profile(user["id"], failed_profile)
+        return {
+            "status": "ok",
+            "rating": "bad",
+            "committed": False,
+            "message": "Draft discarded. Corrections will guide the next research for this person.",
+            "user": _public_user(user),
+        }
+
+    # good → commit
+    path = profiles.save(
+        name,
+        company,
+        merged,
+        summary,
+        common_ground=overlap,
+        usage=usage,
+    )
+    rec = profiles.load(name, company) or {}
+    rec["visibility"] = "public"
+    if university:
+        rec["university"] = university
+    if linkedin_url:
+        contact = dict(rec.get("contact") or {})
+        contact["linkedin_url"] = linkedin_url  # always keep Find Me canonical
+        rec["contact"] = contact
+    if draft.get("mutuals") is not None:
+        rec["mutuals"] = draft.get("mutuals")
+    if draft.get("in_your_network") is not None:
+        rec["in_your_network"] = draft.get("in_your_network")
+    path.write_text(__import__("json").dumps(rec, indent=2))
+
+    profiles.record_interaction(
+        name,
+        company,
+        {
+            "type": "research_commit",
+            "tier": usage.get("tier"),
+            "tokens_charged": usage.get("tokens_charged"),
+            "user_id": user["id"],
+            "rating": "good",
+        },
+    )
+    record_feedback(
+        user_id=user["id"],
+        rating="good",
+        name=name,
+        company=company,
+        university=university,
+        linkedin_url=linkedin_url,
+        person_slug=path.stem,
+        draft_id=body.draft_id,
+    )
+
+    # Self-research drafts also claim + refresh YOU profile
+    if draft.get("kind") == "self_research" or draft.get("tier") == "self":
+        profile = user.get("profile") or {}
+        researched = profile_from_research(
+            name=name,
+            company=company,
+            summary=summary,
+            sources=all_sources,
+            contact=profile.get("contact") or {},
+            linkedin_url=linkedin_url,
+        )
+        researched["researched_at"] = datetime.now(timezone.utc).isoformat()
+        researched["research_status"] = "ok"
+        researched["self_profile_slug"] = path.stem
+        researched["profile_source"] = "claimed_public"
+        merged_profile = merge_manual_overlays(researched, profile)
+        user = users.replace_profile(user["id"], merged_profile)
+        rec["claimed_user_id"] = user["id"]
+        path.write_text(__import__("json").dumps(rec, indent=2))
+
+    delete_draft(body.draft_id)
+    dossier = public_dossier_from_record(rec)
+    contact_out = dict(dossier.get("contact") or {})
+    if linkedin_url:
+        contact_out["linkedin_url"] = linkedin_url
+    return {
+        "status": "ok",
+        "rating": "good",
+        "committed": True,
+        "name": name,
+        "company": company,
+        "profile_slug": path.stem,
+        "summary": _public_summary(summary),
+        "conversation": draft.get("conversation") or {"status": "skipped"},
+        "public": dossier,
+        "contact": contact_out,
+        "linkedin_url": linkedin_url or contact_out.get("linkedin_url"),
+        "user": _public_user(user),
+    }
 
 
 @app.post("/auth/login")
@@ -185,32 +694,291 @@ def update_profile(body: ProfileUpdateBody, user=Depends(require_user)):
     return _public_user(user)
 
 
+@app.patch("/me/settings")
+def update_settings(body: SettingsBody, user=Depends(require_user)):
+    patch = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "auto_prep" in patch:
+        cal = dict((user.get("settings") or {}).get("calendar") or {})
+        cal["auto_prep"] = patch.pop("auto_prep")
+        patch["calendar"] = cal
+    user = users.update_settings(user["id"], patch)
+    return _public_user(user)
+
+
+@app.post("/auth/otp/send")
+def otp_send(body: OtpSendBody, user=Depends(require_user)):
+    from otp import issue_otp
+
+    dest = (body.destination or "").strip()
+    if body.channel == "email":
+        dest = dest or user.get("email") or ""
+    else:
+        dest = dest or ((user.get("profile") or {}).get("contact") or {}).get("phone") or ""
+    if not dest:
+        raise HTTPException(400, f"No {body.channel} on file — provide destination")
+    return issue_otp(user["id"], body.channel, dest)
+
+
+@app.post("/auth/otp/verify")
+def otp_verify(body: OtpVerifyBody, user=Depends(require_user)):
+    from otp import verify_otp
+
+    result = verify_otp(user["id"], body.channel, body.code)
+    if result.get("status") != "ok":
+        raise HTTPException(400, result.get("error") or "OTP failed")
+    profile = dict(user.get("profile") or {})
+    verified = dict(profile.get("identity_verified") or {})
+    verified[body.channel] = {
+        "verified": True,
+        "at": datetime.now(timezone.utc).isoformat(),
+    }
+    profile["identity_verified"] = verified
+    users.replace_profile(user["id"], profile)
+    return {"ok": True, "user": _public_user(users.get(user["id"]))}
+
+
+@app.post("/verify/handles")
+def verify_handles_endpoint(body: VerifyHandlesBody):
+    """Pre-account handle verification for signup — call once; cache results client-side."""
+    from handle_verify import verify_handles
+
+    return verify_handles(
+        name=body.name.strip(),
+        company=(body.company or "").strip() or None,
+        university=(body.university or "").strip() or None,
+        handles={k: v for k, v in (body.handles or {}).items() if v},
+    )
+
+
+@app.post("/me/connections")
+def upload_connections(body: ConnectionsUploadBody, user=Depends(require_user)):
+    from connections import parse_linkedin_connections_csv
+
+    rows = parse_linkedin_connections_csv(body.csv)
+    if not rows:
+        raise HTTPException(400, "No connections parsed — check LinkedIn Connections CSV format")
+    users.replace_connections(user["id"], rows)
+    return {"ok": True, "imported": len(rows), "filename": body.filename}
+
+
+@app.get("/me/connections")
+def get_connections(user=Depends(require_user)):
+    conns = user.get("connections") or []
+    return {
+        "count": len(conns),
+        "imported_at": user.get("connections_imported_at"),
+        "sample": conns[:5],
+    }
+
+
+@app.get("/me/private/journal")
+def get_private_journal(user=Depends(require_user)):
+    from private_journal import list_entries
+
+    return {"visibility": "private", "entries": list_entries(user)}
+
+
+@app.post("/me/private/journal")
+def post_private_journal(body: JournalEntryBody, user=Depends(require_user)):
+    from private_journal import add_entry, list_entries
+
+    try:
+        entry = add_entry(
+            users,
+            user["id"],
+            body=body.body,
+            entry_type=body.entry_type,
+            tags=body.tags,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "entry": entry, "entries": list_entries(users.get(user["id"]))}
+
+
+@app.delete("/me/private/journal/{entry_id}")
+def delete_private_journal(entry_id: str, user=Depends(require_user)):
+    from private_journal import delete_entry, list_entries
+
+    delete_entry(users, user["id"], entry_id)
+    return {"ok": True, "entries": list_entries(users.get(user["id"]))}
+
+
+@app.post("/me/pending-facts")
+def add_pending_fact(body: PendingFactBody, user=Depends(require_user)):
+    status = "trusted_personal" if body.trusted_personal else "pending"
+    users.add_pending_fact(
+        user["id"],
+        {
+            "claim": body.claim.strip(),
+            "person_name": body.person_name,
+            "person_company": body.person_company,
+            "status": status,
+        },
+    )
+    return {"ok": True, "pending_facts": (users.get(user["id"]) or {}).get("pending_facts") or []}
+
+
+@app.patch("/me/pending-facts/{fact_id}")
+def patch_pending_fact(fact_id: str, body: PendingFactUpdateBody, user=Depends(require_user)):
+    users.update_pending_fact(user["id"], fact_id, body.status, body.evidence)
+    return {"ok": True, "pending_facts": (users.get(user["id"]) or {}).get("pending_facts") or []}
+
+
+@app.get("/calendar/oauth-url")
+def calendar_oauth_url(redirect_uri: str, user=Depends(require_user)):
+    from calendar_prep import oauth_authorize_url
+
+    return oauth_authorize_url(redirect_uri, state=user["id"])
+
+
+@app.post("/calendar/oauth")
+def calendar_oauth(body: CalendarOAuthBody, user=Depends(require_user)):
+    from calendar_prep import exchange_code, store_calendar_link
+
+    tokens = exchange_code(body.code, body.redirect_uri)
+    if tokens.get("status") != "ok":
+        raise HTTPException(400, tokens.get("error") or tokens.get("reason") or "OAuth failed")
+    store_calendar_link(users, user["id"], tokens)
+    return {"ok": True}
+
+
+@app.post("/calendar/sync-prep")
+def calendar_sync_prep(user=Depends(require_user)):
+    from calendar_prep import enqueue_from_calendar
+
+    return enqueue_from_calendar(users, user["id"])
+
+
+@app.get("/calendar/prep-queue")
+def calendar_prep_queue(user=Depends(require_user)):
+    queue = ((user.get("settings") or {}).get("meeting_prep_queue")) or []
+    return {"queue": queue}
+
+
 # ─── research ───────────────────────────────────────────────────────────────
 
 
 @app.post("/candidates")
 def candidates(body: CandidatesBody, user=Depends(require_user)):
+    return _candidates_impl(body)
+
+
+@app.post("/public/candidates")
+def public_candidates(body: CandidatesBody):
+    """Unauthenticated name disambiguation for signup (name-first flow)."""
+    return _candidates_impl(body)
+
+
+def _candidates_impl(body: CandidatesBody):
     from connectors import gemini_search
 
-    result = gemini_search.find_candidates(body.name.strip())
-    if result.get("status") != "ok":
-        return {"candidates": [], "status": result.get("status"), "error": result.get("error")}
-    return {"candidates": result.get("candidates") or [], "status": "ok"}
+    name = body.name.strip()
+    print("=" * 60, flush=True)
+    print(f"[/public/candidates] REQUEST name={name!r}", flush=True)
+    print(
+        f"  filters company={body.company!r} university={body.university!r} "
+        f"linkedin={body.linkedin_url!r}",
+        flush=True,
+    )
+    if not name:
+        print("[/public/candidates] REJECT empty name", flush=True)
+        raise HTTPException(400, "Name required")
+
+    result = gemini_search.find_candidates(name)
+    status = result.get("status")
+    err = result.get("error") or result.get("reason")
+    print(f"[/public/candidates] gemini status={status!r} error={err!r}", flush=True)
+
+    if status == "skipped":
+        print(f"[/public/candidates] SKIPPED: {err}", flush=True)
+        return {"candidates": [], "status": status, "error": err or "Gemini unavailable"}
+    if status == "error":
+        print(f"[/public/candidates] ERROR: {err}", flush=True)
+        return {"candidates": [], "status": status, "error": err or "Candidate search failed"}
+    if status != "ok":
+        print(f"[/public/candidates] not_found / empty — returning []", flush=True)
+        return {"candidates": [], "status": status or "not_found", "error": err}
+
+    cands = list(result.get("candidates") or [])
+    before = len(cands)
+    company = (body.company or "").strip().lower()
+    university = (body.university or "").strip().lower()
+    linkedin = (body.linkedin_url or "").strip().lower()
+    if company:
+        filtered = [
+            c
+            for c in cands
+            if company in (c.get("company") or "").lower()
+            or company in (c.get("context") or "").lower()
+        ]
+        print(f"[/public/candidates] company filter {company!r}: {before} → {len(filtered) or before}", flush=True)
+        cands = filtered or cands
+    if university:
+        filtered = [
+            c
+            for c in cands
+            if university in (c.get("context") or "").lower()
+            or university in (c.get("location") or "").lower()
+            or university in (c.get("company") or "").lower()
+        ]
+        print(f"[/public/candidates] university filter {university!r}: {len(cands)} → {len(filtered) or len(cands)}", flush=True)
+        if filtered:
+            cands = filtered
+    if linkedin:
+        filtered = [
+            c
+            for c in cands
+            if linkedin in (c.get("linkedin_url") or "").lower()
+            or linkedin.replace("https://", "") in (c.get("linkedin_url") or "").lower()
+        ]
+        print(f"[/public/candidates] linkedin filter: {len(cands)} → {len(filtered) or len(cands)}", flush=True)
+        if filtered:
+            cands = filtered
+
+    print(f"[/public/candidates] RESPONSE ok count={len(cands)}", flush=True)
+    for i, c in enumerate(cands):
+        print(f"  → [{i}] {c.get('name')} @ {c.get('company')} | {c.get('role')}", flush=True)
+    print("=" * 60, flush=True)
+    out = {"candidates": cands, "status": "ok"}
+    if result.get("warning"):
+        out["warning"] = result["warning"]
+    if result.get("discovery"):
+        out["discovery"] = result["discovery"]
+    return out
 
 
 @app.post("/research")
 def research(body: ResearchBody, user=Depends(require_user)):
+    # Filters optional if a cached dossier can match; otherwise need disambiguator
+    has_filter = bool(
+        (body.company or "").strip()
+        or (body.university or "").strip()
+        or (body.linkedin_url or "").strip()
+    )
+    from people_lookup import find_cached_person
+
+    cached = find_cached_person(
+        profiles,
+        name=body.name.strip(),
+        company=(body.company or "").strip() or None,
+        university=(body.university or "").strip() or None,
+        linkedin_url=(body.linkedin_url or "").strip() or None,
+    )
+    if not has_filter and not cached and not body.force_refresh:
+        raise HTTPException(400, "Company, university, or LinkedIn URL required (or pick a cached match)")
+
     cost = TOKEN_COST_DETAILED if body.tier == "detailed" else TOKEN_COST_BASIC
-    if user.get("tokens", 0) < cost:
-        raise HTTPException(
-            402,
-            f"Not enough tokens (need {cost}, have {user.get('tokens', 0)}). "
-            "Basic=1, detailed with overlap=3.",
-        )
+    if user.get("tokens", 0) < 1:
+        raise HTTPException(402, "Not enough tokens")
 
     result = _run_research(body, user)
     if result.get("status") == "ok":
-        users.charge_tokens(user["id"], cost, reason=f"research:{body.tier}:{body.name}")
+        charge = int((result.get("usage") or {}).get("tokens_charged") or cost)
+        charge = max(0, min(charge, cost))
+        if charge:
+            if user.get("tokens", 0) < charge:
+                raise HTTPException(402, f"Not enough tokens (need {charge})")
+            users.charge_tokens(user["id"], charge, reason=f"research:{body.tier}:{body.name}")
         users.append_interaction(
             user["id"],
             {
@@ -218,13 +986,55 @@ def research(body: ResearchBody, user=Depends(require_user)):
                 "person_name": body.name,
                 "company": body.company,
                 "tier": body.tier,
-                "tokens_charged": cost,
-                "overlap_score": (result.get("common_ground") or {}).get("overlap_score"),
+                "tokens_charged": charge,
+                "from_cache": result.get("from_cache"),
                 "profile_slug": result.get("profile_slug"),
             },
         )
         user = users.get(user["id"])
         result["tokens_remaining"] = user.get("tokens")
+    result.pop("_engine", None)
+    return result
+
+
+@app.post("/people/{name}/refresh")
+def refresh_person(
+    name: str,
+    company: Optional[str] = None,
+    fetch_social: bool = False,
+    user=Depends(require_user),
+):
+    """Incremental refresh — only re-fetches stale sources; returns what's new."""
+    ttl_hours = float(os.environ.get("CACHE_TTL_HOURS", "24"))
+    fresh, stale = profiles.freshness(name, company, ttl_hours)
+    existing = profiles.load(name, company)
+    if not stale:
+        wn = (existing or {}).get("whats_new") or {"changes": []}
+        return {
+            "status": "ok",
+            "refreshed": False,
+            "reason": "all_sources_fresh",
+            "whats_new": wn,
+            "fresh_sources": sorted(fresh),
+        }
+    if user.get("tokens", 0) < 1:
+        raise HTTPException(402, "Need 1 token to refresh stale sources")
+    result = _run_research(
+        ResearchBody(
+            name=name,
+            company=company,
+            tier="basic",
+            fetch_social=fetch_social,
+            force_refresh=False,
+        ),
+        user,
+    )
+    if result.get("status") == "ok":
+        users.charge_tokens(user["id"], 1, reason=f"refresh:{name}")
+    result.pop("_engine", None)
+    record = profiles.load(name, company) or {}
+    result["whats_new"] = record.get("whats_new") or {"changes": []}
+    result["refreshed"] = True
     return result
 
 
@@ -245,32 +1055,64 @@ def list_people(user=Depends(require_user)):
             "company": key[1] or None,
             "profile_slug": slug,
             "last_researched_at": event.get("at"),
-            "overlap_score": event.get("overlap_score"),
             "tier": event.get("tier"),
+            "has_conversation": event.get("tier") == "detailed",
             "contact": (record or {}).get("contact") or {},
             "summary_blurb": ((record or {}).get("latest_summary") or {}).get("summary"),
+            "talk_teaser": _talk_teaser(record),
         }
     return {"people": list(seen.values())}
 
 
 @app.get("/people/{name}")
 def get_person(name: str, company: Optional[str] = None, user=Depends(require_user)):
+    from people_lookup import public_dossier_from_record
+
     record = profiles.load(name, company)
     if not record:
         raise HTTPException(404, "Person not found in your research cache")
     sources = record.get("latest_sources") or {}
+    engine = record.get("latest_common_ground")
+    summary = record.get("latest_summary") or {}
+    conversation = public_conversation(engine) if engine else public_conversation(
+        summary.get("conversation") or summary.get("common_ground")
+    )
+    # Mutuals from user's LinkedIn CSV (evidence only)
+    from connections import find_person_in_connections, match_mutuals
+
+    connections = user.get("connections") or []
+    mutuals = match_mutuals(name, company, connections) if connections else []
+    in_network = find_person_in_connections(name, connections, company=company) if connections else None
+    pending = [
+        f
+        for f in (user.get("pending_facts") or [])
+        if (f.get("person_name") or "").lower() == name.lower()
+    ]
+    dossier = public_dossier_from_record(record)
     return {
+        "visibility": "public",
         "name": record.get("name"),
         "company": record.get("company"),
-        "contact": record.get("contact") or {},
-        "summary": record.get("latest_summary"),
-        "common_ground": record.get("latest_common_ground"),
-        "usage": record.get("latest_usage"),
+        "university": record.get("university"),
+        "contact": dossier.get("contact") or {},
+        "summary": _public_summary(summary),
+        "conversation": conversation,
+        "public": dossier,
+        "usage": {
+            "tier": (record.get("latest_usage") or {}).get("tier"),
+            "tokens_charged": (record.get("latest_usage") or {}).get("tokens_charged"),
+            "from_cache": (record.get("latest_usage") or {}).get("from_cache"),
+        },
         "interactions": record.get("interactions") or [],
         "updated_at": record.get("updated_at"),
         "source_status": record.get("latest_source_status") or {},
-        # Lightweight social / personal snapshots for the full briefing UI
+        "whats_new": record.get("whats_new"),
+        "mutuals": mutuals,
+        "in_your_network": in_network,
+        "pending_facts": pending,
         "sources": {
+            "apollo": sources.get("apollo"),
+            "public_web": sources.get("public_web"),
             "personal_info": sources.get("personal_info"),
             "instagram_public": sources.get("instagram_public"),
             "facebook_public": sources.get("facebook_public"),
@@ -308,24 +1150,52 @@ def add_interaction(
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "connect-deeply"}
+    from calendar_prep import calendar_configured
+    from db import supabase_enabled
+
+    return {
+        "ok": True,
+        "service": "connect-deeply",
+        "apollo_configured": bool((os.environ.get("APOLLO_API_KEY") or "").strip()),
+        "enrichlayer_configured": bool(
+            (os.environ.get("ENRICHLAYER_API_KEY") or os.environ.get("ENRICH_LAYER_API_KEY") or "").strip()
+        ),
+        "supabase_configured": supabase_enabled(),
+        "calendar_configured": calendar_configured(),
+    }
 
 
 # ─── internals ──────────────────────────────────────────────────────────────
 
 
-def _run_research(body: ResearchBody, user: dict) -> dict:
-    name = body.name.strip()
-    company = (body.company or "").strip() or None
-    ttl_hours = float(os.environ.get("CACHE_TTL_HOURS", "24"))
+def _fetch_person_briefing(
+    *,
+    name: str,
+    company: Optional[str] = None,
+    university: Optional[str] = None,
+    place: Optional[str] = None,
+    linkedin_url: Optional[str] = None,
+    fetch_social: bool = False,
+    force_refresh: bool = False,
+    github_username: Optional[str] = None,
+    instagram_handle: Optional[str] = None,
+    twitter_handle: Optional[str] = None,
+    facebook_url: Optional[str] = None,
+    persist: bool = True,
+    user_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """Research + summarize a person (no conversation / no token charge).
 
-    if body.force_refresh:
+    When persist=False, stages a draft for good/bad rating instead of writing people DB.
+    """
+    ttl_hours = float(os.environ.get("CACHE_TTL_HOURS", "24"))
+    if force_refresh:
         fresh: set = set()
     else:
         fresh, _ = profiles.freshness(name, company, ttl_hours)
 
     skip = set(fresh)
-    if not body.fetch_social:
+    if not fetch_social:
         skip |= set(SOCIAL_SOURCES)
 
     existing = profiles.load(name, company)
@@ -333,20 +1203,58 @@ def _run_research(body: ResearchBody, user: dict) -> dict:
         PersonQuery(
             name=name,
             company=company,
-            university=body.university,
-            place=body.place,
-            linkedin_url=body.linkedin_url,
+            university=university,
+            place=place,
+            linkedin_url=linkedin_url,
+            github_username=github_username,
         ),
         skip=frozenset(skip),
     )
+
+
+    # If signup provided exact social handles, deep-fetch those directly.
+    if instagram_handle and "instagram_public" not in skip:
+        from connectors import instagram as ig
+
+        print(f"  [self] Instagram @{instagram_handle}")
+        raw_results["instagram_public"] = ig.fetch_instagram(
+            name=name,
+            company=company,
+            university=university,
+            place=place,
+            instagram_url=f"https://www.instagram.com/{instagram_handle}/",
+        )
+    if twitter_handle and "twitter_public" not in skip:
+        from connectors import twitter as tw
+
+        print(f"  [self] Twitter @{twitter_handle}")
+        raw_results["twitter_public"] = tw.fetch_twitter(
+            name=name,
+            company=company,
+            university=university,
+            place=place,
+            twitter_url=f"https://x.com/{twitter_handle}",
+        )
+    if facebook_url and "facebook_public" not in skip:
+        from connectors import facebook as fb
+
+        print(f"  [self] Facebook {facebook_url}")
+        raw_results["facebook_public"] = fb.fetch_facebook(
+            name=name,
+            company=company,
+            university=university,
+            place=place,
+            facebook_url=facebook_url,
+        )
 
     merged = merge_profile(
         query={
             "name": name,
             "company": company,
-            "university": body.university,
-            "place": body.place,
-            "linkedin_url": body.linkedin_url,
+            "university": university,
+            "place": place,
+            "linkedin_url": linkedin_url,
+            "github_username": github_username,
         },
         raw_results=raw_results,
     )
@@ -355,9 +1263,15 @@ def _run_research(body: ResearchBody, user: dict) -> dict:
     if not has_new_data and existing and existing.get("latest_summary"):
         summary = existing["latest_summary"]
     else:
+        from research_feedback import corrections_prompt_block, mark_applied, prior_bad_corrections
+
         cached_sources = (existing or {}).get("latest_sources", {})
         llm_view = copy.deepcopy(merged)
         llm_view["sources"] = {**cached_sources, **raw_results}
+        prior = prior_bad_corrections(name=name, company=company, linkedin_url=linkedin_url)
+        if prior:
+            llm_view["prior_user_corrections"] = prior
+            llm_view["prior_user_corrections_text"] = corrections_prompt_block(prior)
         summary = summarize_profile(llm_view)
         if summary.get("status") != "ok":
             cached = (existing or {}).get("latest_summary")
@@ -369,12 +1283,197 @@ def _run_research(body: ResearchBody, user: dict) -> dict:
                     "error": summary.get("error") or "Summarization failed",
                     "source_status": {k: v.get("status") for k, v in raw_results.items()},
                 }
+        elif prior:
+            mark_applied([p["id"] for p in prior if p.get("id")])
 
     cached_sources = (existing or {}).get("latest_sources", {})
     all_sources = {**cached_sources, **raw_results}
 
+    if persist:
+        path = profiles.save(name, company, merged, summary, common_ground=None, usage={"tier": "self"})
+        return {
+            "status": "ok",
+            "name": name,
+            "company": company,
+            "summary": summary,
+            "sources": all_sources,
+            "profile_path": str(path),
+            "profile_slug": path.stem,
+            "needs_rating": False,
+            "draft_id": None,
+        }
+
+    from research_drafts import save_draft
+
+    draft_id = save_draft(
+        {
+            "name": name,
+            "company": company,
+            "university": university,
+            "linkedin_url": linkedin_url,
+            "place": place,
+            "merged": merged,
+            "summary": summary,
+            "common_ground": None,
+            "usage": {"tier": "self", "tokens_charged": 0},
+            "all_sources": all_sources,
+            "raw_results": raw_results,
+            "conversation": {"status": "skipped"},
+            "mutuals": [],
+            "in_your_network": None,
+            "user_id": user_id,
+            "tier": "self",
+            "kind": "self_research",
+        }
+    )
+    return {
+        "status": "ok",
+        "name": name,
+        "company": company,
+        "summary": summary,
+        "sources": all_sources,
+        "profile_path": None,
+        "profile_slug": None,
+        "needs_rating": True,
+        "draft_id": draft_id,
+    }
+
+
+def _run_research(body: ResearchBody, user: dict) -> dict:
+    name = body.name.strip()
+    company = (body.company or "").strip() or None
+    university = (body.university or "").strip() or None
+    linkedin_url = (body.linkedin_url or "").strip() or None
+    ttl_hours = float(os.environ.get("CACHE_TTL_HOURS", "24"))
+
+    from people_lookup import find_cached_person, public_dossier_from_record
+    from private_journal import find_user_claiming_person, overlap_hints_from_private
+
+    existing = find_cached_person(
+        profiles,
+        name=name,
+        company=company,
+        university=university,
+        linkedin_url=linkedin_url,
+    ) or profiles.load(name, company)
+
+    from research_feedback import (
+        corrections_prompt_block,
+        has_blocking_bad_feedback,
+        mark_applied,
+        prior_bad_corrections,
+    )
+
+    blocking_bad = has_blocking_bad_feedback(
+        name=name, company=company, linkedin_url=linkedin_url
+    )
+    if blocking_bad:
+        print("  [feedback] prior BAD rating — skip cache reuse, re-research with corrections", flush=True)
+
+    reuse_full = (
+        not body.force_refresh
+        and not blocking_bad
+        and existing
+        and existing.get("latest_summary")
+        and (existing.get("latest_summary") or {}).get("status") == "ok"
+    )
+
+    raw_results: dict = {}
+    from_cache = False
+    if reuse_full:
+        # Reuse DB dossier — no connector / Gemini research spend
+        print(f"  [cache] reusing public dossier for {name} @ {company or university or linkedin_url or '?'}")
+        summary = existing["latest_summary"]
+        all_sources = existing.get("latest_sources") or {}
+        from_cache = True
+        # Minimal merged shell for save path
+        merged = {
+            "fetched_at": existing.get("updated_at")
+            or __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+            "sources": {},
+            "source_status": existing.get("latest_source_status") or {},
+        }
+    else:
+        if body.force_refresh:
+            fresh: set = set()
+        else:
+            fresh, _ = profiles.freshness(name, company, ttl_hours)
+
+        skip = set(fresh)
+        if not body.fetch_social:
+            skip |= set(SOCIAL_SOURCES)
+
+        raw_results = orchestrator.run(
+            PersonQuery(
+                name=name,
+                company=company,
+                university=university,
+                place=body.place,
+                linkedin_url=linkedin_url,
+            ),
+            skip=frozenset(skip),
+        )
+
+        merged = merge_profile(
+            query={
+                "name": name,
+                "company": company,
+                "university": university,
+                "place": body.place,
+                "linkedin_url": linkedin_url,
+            },
+            raw_results=raw_results,
+        )
+
+        has_new_data = any(r.get("status") == "ok" for r in raw_results.values())
+        if not has_new_data and existing and existing.get("latest_summary"):
+            summary = existing["latest_summary"]
+            from_cache = True
+        else:
+            cached_sources = (existing or {}).get("latest_sources", {})
+            llm_view = copy.deepcopy(merged)
+            llm_view["sources"] = {**cached_sources, **raw_results}
+            prior = prior_bad_corrections(
+                name=name, company=company, linkedin_url=linkedin_url
+            )
+            if prior:
+                llm_view["prior_user_corrections"] = prior
+                llm_view["prior_user_corrections_text"] = corrections_prompt_block(prior)
+                print(f"  [feedback] injecting {len(prior)} prior bad correction(s)", flush=True)
+            summary = summarize_profile(llm_view)
+            if summary.get("status") != "ok":
+                cached = (existing or {}).get("latest_summary")
+                if isinstance(cached, dict) and cached.get("status") == "ok":
+                    summary = cached
+                    from_cache = True
+                else:
+                    return {
+                        "status": "error",
+                        "error": summary.get("error") or "Summarization failed",
+                        "source_status": {k: v.get("status") for k, v in raw_results.items()},
+                    }
+            elif prior:
+                mark_applied([p["id"] for p in prior if p.get("id")])
+
+        cached_sources = (existing or {}).get("latest_sources", {})
+        all_sources = {**cached_sources, **raw_results}
+
+    # Private overlap fuel if THEM is a claimed Connect Deeply user
+    claimed = find_user_claiming_person(
+        users,
+        name=name,
+        company=company,
+        slug=(existing or {}).get("slug") if existing else None,
+    )
+    # Also try slug from path after save
+    them_hints = overlap_hints_from_private(claimed) if claimed else {}
+
     overlap = None
-    usage = {"tier": "basic", "tokens_charged": TOKEN_COST_BASIC}
+    usage = {
+        "tier": "basic",
+        "tokens_charged": 0 if from_cache and body.tier == "basic" else TOKEN_COST_BASIC,
+        "from_cache": from_cache,
+    }
     if body.tier == "detailed" and summary.get("status") == "ok":
         you_profile = user.get("profile") or {}
         overlap = analyze_common_ground(
@@ -382,15 +1481,16 @@ def _run_research(body: ResearchBody, user: dict) -> dict:
             them_name=name,
             user_profile=you_profile,
             them_sources=all_sources,
+            them_hints=them_hints or None,
         )
         if overlap.get("status") == "ok":
             summary = apply_overlap_to_summary(summary, overlap)
+            # Cache hit: still charge detailed overlap (cheaper than full research)
             usage = {
                 "tier": "detailed",
-                "tokens_charged": TOKEN_COST_DETAILED,
-                "overlap_score": overlap.get("overlap_score"),
+                "tokens_charged": TOKEN_COST_DETAILED if not from_cache else max(1, TOKEN_COST_DETAILED - 1),
+                "from_cache": from_cache,
             }
-            # Feed profile-gap suggestions back onto the user for Phase-3 refinement.
             gaps = overlap.get("your_profile_gaps") or []
             if gaps:
                 users.update_profile(
@@ -398,30 +1498,174 @@ def _run_research(body: ResearchBody, user: dict) -> dict:
                     {"profile_refinement": {"known_gaps": gaps, "last_from": name}},
                 )
 
-    path = profiles.save(
-        name, company, merged, summary, common_ground=overlap, usage=usage
-    )
-    profiles.record_interaction(
-        name,
-        company,
-        {
-            "type": "research",
-            "tier": usage.get("tier"),
-            "tokens_charged": usage.get("tokens_charged"),
-            "overlap_score": usage.get("overlap_score"),
-            "user_id": user["id"],
-        },
-    )
+    if from_cache and not raw_results:
+        # Already published dossier — no rating gate
+        path = profiles.path_for(name, company)
+        if existing:
+            existing["latest_common_ground"] = overlap
+            existing["latest_usage"] = usage
+            existing["visibility"] = "public"
+            if university and not existing.get("university"):
+                existing["university"] = university
+            path.write_text(__import__("json").dumps(existing, indent=2))
+        else:
+            path = profiles.save(
+                name, company, merged, summary, common_ground=overlap, usage=usage
+            )
+
+        profiles.record_interaction(
+            name,
+            company,
+            {
+                "type": "research",
+                "tier": usage.get("tier"),
+                "tokens_charged": usage.get("tokens_charged"),
+                "from_cache": from_cache,
+                "user_id": user["id"],
+            },
+        )
+        conversation = public_conversation(overlap) if overlap else {"status": "skipped"}
+        from connections import find_person_in_connections, match_mutuals
+
+        connections = user.get("connections") or []
+        mutuals = match_mutuals(name, company, connections) if connections else []
+        in_network = find_person_in_connections(name, connections, company=company) if connections else None
+        record = profiles.load(name, company) or {}
+        if mutuals or in_network:
+            record["mutuals"] = mutuals
+            record["in_your_network"] = in_network
+            path.write_text(__import__("json").dumps(record, indent=2))
+        dossier = public_dossier_from_record(record)
+        return {
+            "status": "ok",
+            "name": name,
+            "company": company,
+            "university": university,
+            "profile_path": str(path),
+            "profile_slug": path.stem,
+            "from_cache": True,
+            "needs_rating": False,
+            "draft_id": None,
+            "summary": _public_summary(summary),
+            "conversation": conversation,
+            "_engine": overlap,
+            "contact": dossier.get("contact") or {},
+            "public": dossier,
+            "mutuals": mutuals,
+            "in_your_network": in_network,
+            "whats_new": record.get("whats_new"),
+            "usage": usage,
+            "source_status": {
+                **({"_cache": "hit"} if from_cache else {}),
+                **{s: "skipped" for s in SOCIAL_SOURCES if not body.fetch_social},
+            },
+        }
+
+    # Fresh research: stage as draft (unless auto_commit)
+    from research_drafts import save_draft
+
+    conversation = public_conversation(overlap) if overlap else {"status": "skipped"}
+    from connections import find_person_in_connections, match_mutuals
+
+    connections = user.get("connections") or []
+    mutuals = match_mutuals(name, company, connections) if connections else []
+    in_network = find_person_in_connections(name, connections, company=company) if connections else None
+
+    draft_payload = {
+        "name": name,
+        "company": company,
+        "university": university,
+        "linkedin_url": linkedin_url,
+        "place": body.place,
+        "merged": merged,
+        "summary": summary,
+        "common_ground": overlap,
+        "usage": usage,
+        "all_sources": all_sources,
+        "raw_results": raw_results,
+        "conversation": conversation,
+        "mutuals": mutuals,
+        "in_your_network": in_network,
+        "user_id": user["id"],
+        "tier": body.tier,
+    }
+
+    if body.auto_commit:
+        path = profiles.save(
+            name, company, merged, summary, common_ground=overlap, usage=usage
+        )
+        rec = profiles.load(name, company) or {}
+        rec["visibility"] = "public"
+        if university:
+            rec["university"] = university
+        if linkedin_url:
+            contact = dict(rec.get("contact") or {})
+            contact["linkedin_url"] = linkedin_url
+            rec["contact"] = contact
+        if mutuals or in_network:
+            rec["mutuals"] = mutuals
+            rec["in_your_network"] = in_network
+        path.write_text(__import__("json").dumps(rec, indent=2))
+        profiles.record_interaction(
+            name,
+            company,
+            {
+                "type": "research",
+                "tier": usage.get("tier"),
+                "tokens_charged": usage.get("tokens_charged"),
+                "from_cache": from_cache,
+                "user_id": user["id"],
+                "auto_commit": True,
+            },
+        )
+        dossier = public_dossier_from_record(rec)
+        return {
+            "status": "ok",
+            "name": name,
+            "company": company,
+            "university": university,
+            "profile_path": str(path),
+            "profile_slug": path.stem,
+            "from_cache": from_cache,
+            "needs_rating": False,
+            "draft_id": None,
+            "summary": _public_summary(summary),
+            "conversation": conversation,
+            "_engine": overlap,
+            "contact": dossier.get("contact") or {},
+            "public": dossier,
+            "mutuals": mutuals,
+            "in_your_network": in_network,
+            "whats_new": rec.get("whats_new"),
+            "usage": usage,
+            "source_status": {
+                **{k: v.get("status") for k, v in raw_results.items()},
+                **{s: "skipped" for s in SOCIAL_SOURCES if not body.fetch_social},
+            },
+        }
+
+    draft_id = save_draft(draft_payload)
+    # Charge tokens for the work even before rating (research compute was done)
+    # Interaction recorded only on good commit.
 
     return {
         "status": "ok",
         "name": name,
         "company": company,
-        "profile_path": str(path),
-        "profile_slug": path.stem,
-        "summary": summary,
-        "common_ground": overlap,
-        "contact": (profiles.load(name, company) or {}).get("contact") or {},
+        "university": university,
+        "profile_path": None,
+        "profile_slug": None,
+        "from_cache": from_cache,
+        "needs_rating": True,
+        "draft_id": draft_id,
+        "summary": _public_summary(summary),
+        "conversation": conversation,
+        "_engine": overlap,
+        "contact": {"linkedin_url": linkedin_url} if linkedin_url else {},
+        "public": None,
+        "mutuals": mutuals,
+        "in_your_network": in_network,
+        "whats_new": None,
         "usage": usage,
         "source_status": {
             **{k: v.get("status") for k, v in raw_results.items()},
@@ -438,9 +1682,34 @@ def _public_user(user: dict) -> dict:
         "tokens": user.get("tokens", 0),
         "created_at": user.get("created_at"),
         "profile": profile,
+        "profile_source": profile.get("profile_source"),
+        "research_status": profile.get("research_status"),
         "profile_refinement": profile.get("profile_refinement") or user.get("profile_refinement"),
         "interaction_count": len(user.get("interactions") or []),
+        "settings": user.get("settings") or {},
+        "connections_count": len(user.get("connections") or []),
+        "pending_facts": user.get("pending_facts") or [],
+        "handle_verification": profile.get("handle_verification") or {},
     }
+
+
+def _public_summary(summary: Optional[dict]) -> dict:
+    """Drop internal engine fields before sending a briefing to the app."""
+    if not isinstance(summary, dict):
+        return {}
+    skip = {"_conversation_engine", "common_ground", "raw_text"}
+    return {k: v for k, v in summary.items() if k not in skip}
+
+
+def _talk_teaser(record: Optional[dict]) -> Optional[str]:
+    if not record:
+        return None
+    conv = public_conversation(record.get("latest_common_ground"))
+    topics = conv.get("talk_about") or []
+    if topics and isinstance(topics[0], dict) and topics[0].get("topic"):
+        return topics[0]["topic"]
+    openers = conv.get("openers") or []
+    return openers[0] if openers else None
 
 
 def _clean_list(items: list[str]) -> list[str]:

@@ -30,7 +30,7 @@ export default function Crm() {
       <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
         <ScrollView contentContainerStyle={styles.pad}>
           <SectionTitle>Your people</SectionTitle>
-          <Text style={styles.sub}>Saved research, contacts, and overlap — your personal CRM.</Text>
+          <Text style={styles.sub}>Saved briefings, talk ideas, and notes — your personal CRM.</Text>
           {error ? <Text style={styles.err}>{error}</Text> : null}
           {!people.length ? (
             <Text style={styles.empty}>No one yet. Search someone to start building your list.</Text>
@@ -49,14 +49,11 @@ export default function Crm() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.name}>{p.name}</Text>
                   <Text style={styles.meta}>
-                    {[p.company, p.contact?.linkedin_url ? "LinkedIn" : null]
+                    {[p.company, p.talk_teaser, p.contact?.linkedin_url ? "LinkedIn" : null]
                       .filter(Boolean)
                       .join(" · ")}
                   </Text>
                 </View>
-                {p.overlap_score != null ? (
-                  <Text style={styles.score}>{p.overlap_score}</Text>
-                ) : null}
               </Pressable>
             ))
           )}
@@ -81,9 +78,4 @@ const styles = StyleSheet.create({
   },
   name: { fontFamily: fonts.bodySemi, fontSize: 16, color: colors.ink },
   meta: { fontFamily: fonts.body, fontSize: 13, color: colors.muted, marginTop: 2 },
-  score: {
-    fontFamily: fonts.display,
-    fontSize: 20,
-    color: colors.ember,
-  },
 });
