@@ -116,6 +116,9 @@ export default function Home() {
         params: {
           name: res.name,
           company: res.company || "",
+          ...(li ? { linkedin: li } : {}),
+          ...(res.draft_id ? { draftId: res.draft_id } : {}),
+          ...(res.needs_rating ? { needsRating: "1" } : {}),
         },
       });
     } catch (e: any) {

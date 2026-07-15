@@ -61,6 +61,9 @@ _ANGLE_PRIORITY = ["company", "leadership", "university", "place", "posts", "gen
 _SHARED_INSTRUCTIONS = """Only report facts you can actually find in search results — never \
 guess or fill gaps with assumptions.
 
+IDENTITY: Obey the IDENTITY LOCK block in the prompt if present. Never mix facts from a \
+different person who shares this name. If a result is ambiguous, omit it.
+
 Do not rely on login-gated social media content as a source of facts — LinkedIn's post/activity \
 feed and Instagram/Facebook profiles are not accessible without login and must not be used as a \
 source, even if you're tempted to guess what they might contain.
@@ -69,7 +72,8 @@ Report their career history as a timeline if multiple past roles/companies are m
 sources, not just their current role.
 
 Also report their LinkedIn, Instagram, Facebook, and Twitter/X profile URLs if a search result surfaces
-one — just the link, even though you can't see what's actually posted behind it.
+one — just the link, even though you can't see what's actually posted behind it. If a canonical \
+LinkedIn URL is given in IDENTITY LOCK, set social_profile_links.linkedin to that exact URL.
 
 Also note any co-founders, executive team members, board members, or other named colleagues
 that search results explicitly connect to this person (e.g. "co-founded the company with Jane
@@ -86,10 +90,10 @@ Also note any awards, honors, or public recognitions explicitly reported in sear
 
 Also note public writing or posts BY this person that appear in open web results — blog posts,
 conference talks, interviews they gave, newsletter issues, public X/Twitter threads indexed by
-search, Medium/Substack articles, etc. Summarize what each is about. Do NOT invent LinkedIn
-activity or "liked" posts — LinkedIn's feed and reactions are login-gated and unavailable here.
-Only include liked_or_engaged_with if a public source explicitly shows them endorsing, quoting,
-or reacting to something (rare).
+search, Medium/Substack articles, etc. Summarize what each is about and include the source_url
+when known. Do NOT invent LinkedIn activity or "liked" posts — LinkedIn's feed and reactions are \
+login-gated and unavailable here. Only include liked_or_engaged_with if a public source explicitly \
+shows them endorsing, quoting, or reacting to something (rare).
 
 Respond with strict JSON only, no markdown fences, matching this schema exactly:
 {{
@@ -102,7 +106,7 @@ Respond with strict JSON only, no markdown fences, matching this schema exactly:
   "awards_and_recognitions": [string],
   "notable_colleagues": [{{"name": string, "context": string}}],
   "senior_colleagues": [{{"name": string, "title": string or null, "context": string, "seniority": "C-level" or "VP" or "Director" or "Board" or "other"}}],
-  "public_posts_or_writing": [{{"topic": string, "source": string or null, "snippet": string or null}}],
+  "public_posts_or_writing": [{{"topic": string, "source": string or null, "source_url": string or null, "snippet": string or null}}],
   "liked_or_engaged_with": [{{"topic": string, "evidence": string}}],
   "social_profile_links": {{"linkedin": string or null, "instagram": string or null, "facebook": string or null, "twitter": string or null}}
 }}
@@ -594,18 +598,23 @@ def search_person(
     company: Optional[str] = None,
     university: Optional[str] = None,
     place: Optional[str] = None,
+    linkedin_url: Optional[str] = None,
 ) -> dict:
     """Runs several targeted searches in parallel instead of one blended
     query — name+company, name+university, name+place (whichever hints are
     given), plus an always-on general angle — since each phrasing biases
     Google's results differently and widens what actually gets found. All
     results are then merged into one profile, with more targeted angles
-    taking priority when fields conflict."""
+    taking priority when fields conflict.
+
+    When linkedin_url is set, every angle is identity-locked to that profile
+    so same-name people are not mixed into the dossier.
+    """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         return {"status": "skipped", "reason": "GEMINI_API_KEY not set"}
 
-    angles = _build_angles(name, company, university, place)
+    angles = _build_angles(name, company, university, place, linkedin_url=linkedin_url)
     for angle, _, description in angles:
         print(f"  querying ({angle} angle): {description}")
 
@@ -614,43 +623,69 @@ def search_person(
         futures = {angle: pool.submit(_run_angle, client, prompt) for angle, prompt, _ in angles}
         angle_results = {angle: future.result() for angle, future in futures.items()}
 
-    return _merge_angles(angle_results)
+    return _merge_angles(angle_results, canonical_linkedin=linkedin_url)
 
 
-def _build_angles(name: str, company: Optional[str], university: Optional[str], place: Optional[str]) -> List[Tuple[str, str, str]]:
+def _build_angles(
+    name: str,
+    company: Optional[str],
+    university: Optional[str],
+    place: Optional[str],
+    linkedin_url: Optional[str] = None,
+) -> List[Tuple[str, str, str]]:
+    from identity_lock import identity_lock_text, normalize_linkedin_url
+
+    lock = identity_lock_text(
+        name=name,
+        linkedin_url=linkedin_url,
+        company=company,
+        university=university,
+    )
+    li = normalize_linkedin_url(linkedin_url)
+
+    def wrap(focus: str) -> str:
+        return f"{lock}\n\nPerson: {name}\nCompany: {company or '(unknown)'}\nUniversity: {university or '(unknown)'}\nLinkedIn: {li or '(unknown)'}\n\n{focus}\n\n{_SHARED_INSTRUCTIONS}"
+
     angles = []
     if company:
         angles.append((
             "company",
-            f"Person: {name}\nCompany: {company}\n\n{_ANGLE_FOCUS['company']}\n\n{_SHARED_INSTRUCTIONS}",
+            wrap(_ANGLE_FOCUS["company"]),
             f'"{name}" + company "{company}" — employer directory / press focus',
         ))
         angles.append((
             "leadership",
-            f"Person: {name}\nCompany: {company}\n\n{_ANGLE_FOCUS['leadership']}\n\n{_SHARED_INSTRUCTIONS}",
+            wrap(_ANGLE_FOCUS["leadership"]),
             f'"{name}" + "{company}" leadership — CEO/CTO/CFO/VP colleagues',
         ))
     if university:
         angles.append((
             "university",
-            f"Person: {name}\nUniversity: {university}\n\n{_ANGLE_FOCUS['university']}\n\n{_SHARED_INSTRUCTIONS}",
+            wrap(_ANGLE_FOCUS["university"]),
             f'"{name}" + university "{university}" — faculty/alumni directory focus',
         ))
     if place:
         angles.append((
             "place",
-            f"Person: {name}\nLocation: {place}\n\n{_ANGLE_FOCUS['place']}\n\n{_SHARED_INSTRUCTIONS}",
+            wrap(_ANGLE_FOCUS["place"]),
             f'"{name}" + location "{place}" — local news/directory focus',
         ))
     angles.append((
         "posts",
-        f"Person: {name}\nCompany: {company or '(unknown)'}\n\n{_ANGLE_FOCUS['posts']}\n\n{_SHARED_INSTRUCTIONS}",
+        wrap(_ANGLE_FOCUS["posts"]),
         f'"{name}" — public posts / writing / talks they authored',
     ))
+    # When LinkedIn+company are known, still run a tight general angle but refuse bare-name sprawl
+    general_focus = _ANGLE_FOCUS["general"]
+    if li:
+        general_focus += (
+            f" Prioritize pages that reference this LinkedIn profile ({li}) or the same "
+            f"employer/school. Skip biographies of other people named {name}."
+        )
     angles.append((
         "general",
-        f"Person: {name}\n\n{_ANGLE_FOCUS['general']}\n\n{_SHARED_INSTRUCTIONS}",
-        f'"{name}" — broad web search (personal site, talks, press, awards)',
+        wrap(general_focus),
+        f'"{name}" — broad web search anchored to identity lock',
     ))
     return angles
 
@@ -679,7 +714,35 @@ def _run_angle(client, prompt: str) -> dict:
     return parsed
 
 
-def _merge_angles(angle_results: dict) -> dict:
+def _merge_angles(angle_results: dict, canonical_linkedin: Optional[str] = None) -> dict:
+    from identity_lock import normalize_linkedin_url, same_linkedin
+
+    canonical = normalize_linkedin_url(canonical_linkedin)
+    filtered = {}
+    for angle, result in angle_results.items():
+        if not isinstance(result, dict):
+            continue
+        if result.get("status") == "error":
+            filtered[angle] = result
+            continue
+        links = result.get("social_profile_links") or {}
+        other_li = links.get("linkedin") if isinstance(links, dict) else None
+        if canonical and other_li and not same_linkedin(canonical, other_li):
+            print(
+                f"  [identity] drop angle={angle} — LinkedIn mismatch "
+                f"{other_li!r} vs canonical {canonical!r}",
+                flush=True,
+            )
+            continue
+        # Force canonical LinkedIn onto matching angles
+        if canonical:
+            links = dict(links) if isinstance(links, dict) else {}
+            links["linkedin"] = canonical
+            result = dict(result)
+            result["social_profile_links"] = links
+        filtered[angle] = result
+
+    angle_results = filtered or angle_results
     ordered = [angle_results[a] for a in _ANGLE_PRIORITY if a in angle_results]
 
     merged = {
@@ -700,7 +763,13 @@ def _merge_angles(angle_results: dict) -> dict:
             for angle in _ANGLE_PRIORITY
             if angle in angle_results
         ],
+        "canonical_linkedin_url": canonical,
     }
+
+    if canonical:
+        links = merged.get("social_profile_links") or {}
+        links["linkedin"] = canonical
+        merged["social_profile_links"] = links
 
     all_urls = _dedupe_urls((r.get("_source_urls") or []) for r in ordered)
     merged["sources"] = [{"url": url, "title": title} for url, title in all_urls]

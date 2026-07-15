@@ -1,6 +1,7 @@
 import React from "react";
 import {
   ActivityIndicator,
+  Linking,
   Pressable,
   StyleSheet,
   Text,
@@ -221,6 +222,9 @@ export function SectionTitle({ children }: { children: string }) {
 
 export function Body({ children }: { children: React.ReactNode }) {
   const { colors } = useTheme();
+  if (typeof children === "string") {
+    return <LinkedText text={children} style={{ fontFamily: fonts.body, fontSize: 15, lineHeight: 22, color: colors.ink }} />;
+  }
   return (
     <Text style={{ fontFamily: fonts.body, fontSize: 15, lineHeight: 22, color: colors.ink }}>
       {children}
@@ -235,11 +239,108 @@ export function Bullet({ children }: { children: React.ReactNode }) {
       <Text style={{ fontFamily: fonts.bodySemi, color: colors.ember, fontSize: 18, lineHeight: 22 }}>
         ·
       </Text>
-      <Text style={{ flex: 1, fontFamily: fonts.body, fontSize: 15, lineHeight: 22, color: colors.ink }}>
-        {children}
-      </Text>
+      {typeof children === "string" ? (
+        <LinkedText
+          text={children}
+          style={{ flex: 1, fontFamily: fonts.body, fontSize: 15, lineHeight: 22, color: colors.ink }}
+        />
+      ) : (
+        <Text style={{ flex: 1, fontFamily: fonts.body, fontSize: 15, lineHeight: 22, color: colors.ink }}>
+          {children}
+        </Text>
+      )}
     </View>
   );
+}
+
+/** Strip raw URLs from research text; show them as "source" hyperlinks instead. */
+export function LinkedText({
+  text,
+  style,
+}: {
+  text: string;
+  style?: Text["props"]["style"];
+}) {
+  const { colors } = useTheme();
+  const { plain, urls } = stripUrlsToLinks(text);
+  if (!urls.length) {
+    return <Text style={style}>{plain || text}</Text>;
+  }
+  return (
+    <Text style={style}>
+      {plain}
+      {plain && urls.length ? " " : null}
+      {urls.map((url, i) => (
+        <Text
+          key={`${url}-${i}`}
+          onPress={() => Linking.openURL(url).catch(() => undefined)}
+          style={{
+            color: colors.leaf,
+            textDecorationLine: "underline",
+            fontFamily: fonts.bodyMed,
+          }}
+        >
+          {i === 0 ? "source" : ` · source ${i + 1}`}
+        </Text>
+      ))}
+    </Text>
+  );
+}
+
+/** Visible label for a standalone URL (no raw link printed). */
+export function UrlLink({
+  url,
+  label = "Open link",
+}: {
+  url?: string | null;
+  label?: string;
+}) {
+  const { colors } = useTheme();
+  if (!url) return null;
+  return (
+    <Text
+      onPress={() => Linking.openURL(url).catch(() => undefined)}
+      style={{
+        fontFamily: fonts.bodyMed,
+        fontSize: 15,
+        lineHeight: 22,
+        color: colors.leaf,
+        textDecorationLine: "underline",
+      }}
+    >
+      {label}
+    </Text>
+  );
+}
+
+const URL_IN_PARENS = /\s*\((https?:\/\/[^)\s]+)\)/gi;
+const BARE_URL = /https?:\/\/[^\s)\]>"']+/gi;
+
+export function stripUrlsToLinks(raw: string): { plain: string; urls: string[] } {
+  if (!raw) return { plain: "", urls: [] };
+  const urls: string[] = [];
+  let plain = raw.replace(URL_IN_PARENS, (_m, url: string) => {
+    urls.push(url);
+    return "";
+  });
+  plain = plain.replace(BARE_URL, (url) => {
+    urls.push(url);
+    return "";
+  });
+  plain = plain
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([.,;:!?])/g, "$1")
+    .replace(/\(\s*\)/g, "")
+    .trim();
+  // de-dupe preserving order
+  const seen = new Set<string>();
+  const uniq: string[] = [];
+  for (const u of urls) {
+    if (seen.has(u)) continue;
+    seen.add(u);
+    uniq.push(u);
+  }
+  return { plain, urls: uniq };
 }
 
 // unused StyleSheet kept out — themed components use inline theme colors

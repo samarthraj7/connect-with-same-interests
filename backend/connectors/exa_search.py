@@ -216,46 +216,54 @@ def search_person_exa(
     company: Optional[str] = None,
     university: Optional[str] = None,
     place: Optional[str] = None,
+    linkedin_url: Optional[str] = None,
 ) -> dict:
-    """Uses Exa's search API to reliably find a person's actual LinkedIn
-    profile URL. The LinkedIn pass is goal-directed, not one-shot: if the
-    first query doesn't turn up a confident linkedin.com/in/ match, a
-    planner proposes a genuinely different next query instead of giving up.
+    """Uses Exa's search API to find LinkedIn + public mentions.
 
-    The general (non-LinkedIn) pass is driven by the reform_query agent:
-    it rewrites the person lookup into a deeper semantic query + phrase
-    filters, runs Exa with those, then extracts public mentions from the
-    snippets. LinkedIn content beyond a bare profile link only ever comes
-    through the dedicated linkedin_public connector — never here."""
+    When linkedin_url is already known (Find Me pick), it is treated as hard
+    truth — we do NOT rediscover a different /in/ profile.
+    """
+    from identity_lock import linkedin_slug, normalize_linkedin_url
+
     api_key = os.environ.get("EXA_API_KEY")
     if not api_key:
         return {"status": "skipped", "reason": "EXA_API_KEY not set"}
 
     headers = {"x-api-key": api_key, "Content-Type": "application/json"}
+    canonical = normalize_linkedin_url(linkedin_url)
+    slug = linkedin_slug(canonical)
 
-    def execute(query: str, include_domains: Optional[List[str]]) -> list:
-        raw = _run_search(headers, query, include_domains=include_domains or ["linkedin.com"], num_results=8) or []
-        return [r for r in raw if _is_profile_url(r.get("url"))]
+    if canonical:
+        print(f"  [exa] using canonical LinkedIn {canonical} (skip rediscovery)", flush=True)
+        linkedin_candidates = [{"url": canonical, "title": name, "text_snippet": None}]
+        linkedin_url_resolved = canonical
+        agent_outcome = {"attempts": [{"query": "canonical", "success": True}], "result": linkedin_candidates}
+    else:
+        def execute(query: str, include_domains: Optional[List[str]]) -> list:
+            raw = _run_search(headers, query, include_domains=include_domains or ["linkedin.com"], num_results=8) or []
+            return [r for r in raw if _is_profile_url(r.get("url"))]
 
-    def success(results: list) -> bool:
-        return len(results) > 0  # already filtered to genuine /in/ profile URLs only
+        def success(results: list) -> bool:
+            return len(results) > 0
 
-    goal = f"Find the exact LinkedIn profile URL (linkedin.com/in/...) for {name}"
-    if company:
-        goal += f", who works at {company}"
+        goal = f"Find the exact LinkedIn profile URL (linkedin.com/in/...) for {name}"
+        if company:
+            goal += f", who works at {company}"
 
-    agent_outcome = run_goal_directed_search(
-        goal=goal,
-        context={"name": name, "company": company, "university": university, "place": place},
-        execute_query=execute,
-        check_success=success,
-        initial_query=f"{name} {company or ''} LinkedIn profile".strip(),
-    )
+        agent_outcome = run_goal_directed_search(
+            goal=goal,
+            context={"name": name, "company": company, "university": university, "place": place},
+            execute_query=execute,
+            check_success=success,
+            initial_query=f"{name} {company or ''} LinkedIn profile".strip(),
+        )
 
-    linkedin_candidates = agent_outcome["result"]
-    linkedin_url = linkedin_candidates[0]["url"] if linkedin_candidates else None
+        linkedin_candidates = agent_outcome["result"]
+        linkedin_url_resolved = linkedin_candidates[0]["url"] if linkedin_candidates else None
+        if linkedin_url_resolved:
+            linkedin_url_resolved = normalize_linkedin_url(linkedin_url_resolved) or linkedin_url_resolved
 
-    # --- Deeper general pass via reform agent ---
+    # --- Deeper general pass via reform agent (anchored when LI known) ---
     print(f"  [reform agent] rewriting general Exa query for {name!r}")
     optimized = reformulate_query(name, company=company, university=university, place=place)
     if optimized and optimized.exa_semantic_query:
@@ -271,6 +279,11 @@ def search_person_exa(
         reformulated = None
         print("  [reform agent] unavailable — falling back to baseline general query")
 
+    if slug:
+        general_query = f"{general_query} {slug}".strip()
+    if company:
+        general_query = f"{general_query} {company}".strip()
+
     general_results = _run_search(
         headers,
         general_query,
@@ -283,6 +296,13 @@ def search_person_exa(
     mentions = []
     for result in general_results or []:
         snippet = result.get("text_snippet") or result.get("title") or ""
+        # Soft identity filter: if we have company, prefer snippets that mention it or the slug
+        blob = f"{snippet} {result.get('url') or ''} {result.get('title') or ''}".lower()
+        if company and company.lower() not in blob and slug and slug not in blob:
+            # Still keep if name appears strongly
+            name_tokens = [t for t in name.lower().split() if len(t) > 2]
+            if not all(t in blob for t in name_tokens[:2]):
+                continue
         mention = extract_and_evaluate_snippet(snippet, result.get("url") or "")
         if mention:
             payload = asdict(mention)
@@ -290,12 +310,13 @@ def search_person_exa(
             payload["title"] = result.get("title")
             mentions.append(payload)
 
-    found = bool(linkedin_url or general_results or mentions)
+    found = bool(linkedin_url_resolved or general_results or mentions)
     return {
         "status": "ok" if found else "not_found",
-        "linkedin_url": linkedin_url,
+        "linkedin_url": linkedin_url_resolved,
         "linkedin_search_attempts": agent_outcome["attempts"],
         "linkedin_candidates": linkedin_candidates,
+        "canonical_linkedin_url": canonical,
         "reformulated": reformulated,
         "general_results": general_results or [],
         "mentions": mentions,

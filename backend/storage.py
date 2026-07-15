@@ -152,8 +152,22 @@ class ProfileStore:
             pass
 
         # Seed contact slots from research when empty (email/phone/linkedin later).
+        # Canonical LinkedIn from the Find Me / research query always wins.
         contact = existing.setdefault("contact", {})
-        _seed_contact_from_sources(contact, existing.get("latest_sources") or {})
+        preferred_li = None
+        try:
+            from identity_lock import normalize_linkedin_url
+
+            preferred_li = normalize_linkedin_url(
+                (merged_profile.get("query") or {}).get("linkedin_url")
+            )
+        except Exception:
+            preferred_li = (merged_profile.get("query") or {}).get("linkedin_url")
+        _seed_contact_from_sources(
+            contact,
+            existing.get("latest_sources") or {},
+            preferred_linkedin=preferred_li,
+        )
 
         history_entry: dict[str, Any] = {
             "fetched_at": merged_profile["fetched_at"],
@@ -214,8 +228,14 @@ class ProfileStore:
         return path
 
 
-def _seed_contact_from_sources(contact: dict, sources: dict) -> None:
-    """Fill missing contact fields from public research (never overwrite user edits)."""
+def _seed_contact_from_sources(contact: dict, sources: dict, *, preferred_linkedin: Optional[str] = None) -> None:
+    """Fill missing contact fields from public research (never overwrite user edits).
+
+    preferred_linkedin (canonical URL from Find Me / research query) always wins
+    when contact.linkedin_url is empty — so Reach out never drops a picked profile.
+    """
+    if preferred_linkedin and not contact.get("linkedin_url"):
+        contact["linkedin_url"] = preferred_linkedin
     apollo = sources.get("apollo") or {}
     if apollo.get("status") == "ok":
         if not contact.get("linkedin_url") and apollo.get("linkedin_url"):
@@ -228,9 +248,14 @@ def _seed_contact_from_sources(contact: dict, sources: dict) -> None:
         for key in ("exa_search", "gemini_search", "linkedin_public"):
             src = sources.get(key) or {}
             url = src.get("linkedin_url") or (src.get("profile") or {}).get("url")
+            if not url and key == "gemini_search":
+                url = (src.get("social_profile_links") or {}).get("linkedin")
             if url:
                 contact["linkedin_url"] = url
                 break
+    # Prefer canonical over rediscovered mismatches
+    if preferred_linkedin:
+        contact["linkedin_url"] = preferred_linkedin
     github = sources.get("github") or {}
     if not contact.get("github_username") and github.get("status") == "ok":
         username = github.get("username") or (github.get("profile") or {}).get("login")

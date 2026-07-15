@@ -2,7 +2,6 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Linking,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,7 +9,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ScreenBackdrop } from "../../../components/ScreenBackdrop";
-import { Body, Bullet, Button, Field, SectionTitle } from "../../../components/ui";
+import { Body, Bullet, Button, Field, SectionTitle, UrlLink } from "../../../components/ui";
 import { api } from "../../../lib/api";
 import { colors, fonts, space } from "../../../lib/theme";
 
@@ -35,10 +34,21 @@ function ListSection({ title, items }: { title: string; items?: any[] }) {
           return <Bullet key={`${title}-${i}`}>{line}</Bullet>;
         }
         if (item?.topic) {
-          const bits = [item.topic, item.source && `[${item.source}]`, item.snippet || item.evidence]
+          const source = item.source ? String(item.source) : "";
+          const sourceIsUrl = /^https?:\/\//i.test(source);
+          const bits = [item.topic, !sourceIsUrl && source && `[${source}]`, item.snippet || item.evidence]
             .filter(Boolean)
             .join(" · ");
-          return <Bullet key={`${title}-${i}`}>{bits}</Bullet>;
+          return (
+            <View key={`${title}-${i}`}>
+              <Bullet>{bits}</Bullet>
+              {sourceIsUrl ? (
+                <View style={{ marginLeft: 16, marginTop: -4, marginBottom: 8 }}>
+                  <UrlLink url={source} label="source" />
+                </View>
+              ) : null}
+            </View>
+          );
         }
         return <Bullet key={`${title}-${i}`}>{JSON.stringify(item)}</Bullet>;
       })}
@@ -58,10 +68,12 @@ function Fact({ label, value }: { label: string; value?: any }) {
       </View>
     );
   }
+  const str = String(value);
+  const looksLikeUrl = /^https?:\/\//i.test(str.trim());
   return (
     <View style={styles.factBlock}>
       <Text style={styles.factLabel}>{label}</Text>
-      <Body>{String(value)}</Body>
+      {looksLikeUrl ? <UrlLink url={str.trim()} label={`Open ${label}`} /> : <Body>{str}</Body>}
     </View>
   );
 }
@@ -82,11 +94,7 @@ function SocialBlock({ label, data }: { label: string; data?: any }) {
         {data.match_confidence ? ` · ${data.match_confidence} match` : ""}
       </Text>
       {handle ? <Text style={styles.cardMeta}>@{String(handle).replace(/^@/, "")}</Text> : null}
-      {url ? (
-        <Text style={styles.link} onPress={() => Linking.openURL(url)}>
-          {url}
-        </Text>
-      ) : null}
+      {url ? <UrlLink url={url} label={`Open ${label}`} /> : null}
       {(profile.biography || profile.bio) ? (
         <Text style={styles.cardBody}>{profile.biography || profile.bio}</Text>
       ) : null}
@@ -98,7 +106,13 @@ function SocialBlock({ label, data }: { label: string; data?: any }) {
 }
 
 export default function PersonDetail() {
-  const { name, company } = useLocalSearchParams<{ name: string; company?: string }>();
+  const { name, company, draftId, needsRating, linkedin: linkedinParam } = useLocalSearchParams<{
+    name: string;
+    company?: string;
+    draftId?: string;
+    needsRating?: string;
+    linkedin?: string;
+  }>();
   const router = useRouter();
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState("");
@@ -106,18 +120,100 @@ export default function PersonDetail() {
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [factDraft, setFactDraft] = useState("");
+  const [pendingDraftId, setPendingDraftId] = useState<string | null>(
+    draftId ? String(draftId) : null,
+  );
+  const [ratingNotes, setRatingNotes] = useState("");
+  const [ratingBusy, setRatingBusy] = useState(false);
+  const [showBadForm, setShowBadForm] = useState(false);
+  const [pickedLinkedin, setPickedLinkedin] = useState<string>(
+    linkedinParam ? String(linkedinParam) : "",
+  );
 
   useEffect(() => {
     if (!name) return;
     (async () => {
       try {
+        if (draftId) {
+          const draft = await api.researchDraft(String(draftId));
+          const li =
+            draft.linkedin_url ||
+            draft.contact?.linkedin_url ||
+            (linkedinParam ? String(linkedinParam) : "") ||
+            "";
+          if (li) setPickedLinkedin(li);
+          setData({
+            name: draft.name || name,
+            company: draft.company || company || "",
+            summary: draft.summary,
+            conversation: draft.conversation,
+            mutuals: draft.mutuals,
+            in_your_network: draft.in_your_network,
+            needs_rating: true,
+            draft_id: draft.draft_id,
+            linkedin_url: li,
+            contact: { ...(draft.contact || {}), ...(li ? { linkedin_url: li } : {}) },
+            sources: draft.sources || {},
+          });
+          setPendingDraftId(draft.draft_id);
+          return;
+        }
         const res = await api.person(String(name), company || null);
+        const li =
+          res?.contact?.linkedin_url ||
+          res?.sources?.exa_search?.linkedin_url ||
+          (linkedinParam ? String(linkedinParam) : "") ||
+          "";
+        if (li) setPickedLinkedin(li);
         setData(res);
       } catch (e: any) {
         setError(e.message || "Failed to load");
       }
     })();
-  }, [name, company]);
+  }, [name, company, draftId, linkedinParam]);
+
+  const submitRating = async (rating: "good" | "bad") => {
+    if (!pendingDraftId) return;
+    if (rating === "bad" && !showBadForm) {
+      setShowBadForm(true);
+      return;
+    }
+    setRatingBusy(true);
+    setError("");
+    try {
+      const res = await api.researchFeedback({
+        draft_id: pendingDraftId,
+        rating,
+        wrong_notes: rating === "bad" ? ratingNotes.trim() || undefined : undefined,
+        wrong_categories: rating === "bad" ? ["quality"] : undefined,
+      });
+      setPendingDraftId(null);
+      setShowBadForm(false);
+      if (rating === "good" && res.committed) {
+        const li = res.linkedin_url || res.contact?.linkedin_url || pickedLinkedin;
+        if (li) setPickedLinkedin(li);
+        setData((d: any) => ({
+          ...d,
+          ...res,
+          needs_rating: false,
+          summary: res.summary || d?.summary,
+          conversation: res.conversation || d?.conversation,
+          contact: { ...(res.contact || d?.contact || {}), ...(li ? { linkedin_url: li } : {}) },
+          linkedin_url: li,
+        }));
+      } else {
+        setError(
+          res.message ||
+            "Marked as bad — not saved. Tell us what was wrong, then research again to improve.",
+        );
+        setTimeout(() => router.back(), 1600);
+      }
+    } catch (e: any) {
+      setError(e.message || "Could not save rating");
+    } finally {
+      setRatingBusy(false);
+    }
+  };
 
   if (!data && !error) {
     return (
@@ -146,9 +242,13 @@ export default function PersonDetail() {
   const collaborators = summary.research_collaborators || [];
   const contact = data?.contact || {};
   const linkedin =
+    pickedLinkedin ||
     contact.linkedin_url ||
+    data?.linkedin_url ||
     data?.sources?.exa_search?.linkedin_url ||
-    data?.sources?.linkedin_public?.profile_url;
+    data?.sources?.gemini_search?.linkedin_url ||
+    data?.sources?.linkedin_public?.profile_url ||
+    (linkedinParam ? String(linkedinParam) : "");
   const sources = data?.sources || {};
   const hasConversation = talkAbout.length > 0 || openers.length > 0 || !!conv.conversation_brief;
 
@@ -178,6 +278,51 @@ export default function PersonDetail() {
             <Text style={styles.meta}>Identity: {summary.identity_confidence}</Text>
           ) : null}
           {error ? <Text style={styles.err}>{error}</Text> : null}
+
+          {pendingDraftId || needsRating === "1" || data?.needs_rating ? (
+            <View style={styles.rateBox}>
+              <Text style={styles.rateTitle}>Is this research good?</Text>
+              <Text style={styles.cardMeta}>
+                Good saves it to your people DB. Bad discards it and stores what went wrong so the next run can improve.
+              </Text>
+              {showBadForm ? (
+                <>
+                  <Field
+                    label="What was wrong?"
+                    value={ratingNotes}
+                    onChangeText={setRatingNotes}
+                    placeholder="Wrong person, wrong company, outdated role, mixed another Samarth…"
+                    multiline
+                  />
+                  <Button
+                    title="Submit bad + discard"
+                    variant="ember"
+                    loading={ratingBusy}
+                    onPress={() => submitRating("bad")}
+                    style={{ marginBottom: 8 }}
+                  />
+                  <Button title="Cancel" variant="ghost" onPress={() => setShowBadForm(false)} />
+                </>
+              ) : (
+                <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
+                  <Button
+                    title="Good — save"
+                    variant="ember"
+                    loading={ratingBusy}
+                    onPress={() => submitRating("good")}
+                    style={{ flex: 1 }}
+                  />
+                  <Button
+                    title="Bad"
+                    variant="ghost"
+                    loading={ratingBusy}
+                    onPress={() => submitRating("bad")}
+                    style={{ flex: 1 }}
+                  />
+                </View>
+              )}
+            </View>
+          ) : null}
 
           <Button
             title={refreshing ? "Refreshing…" : "Refresh (stale sources)"}
@@ -324,8 +469,14 @@ export default function PersonDetail() {
           {(presence.recent_posts_or_writing || []).map((item: any, i: number) => (
             <View key={i} style={styles.card}>
               <Text style={styles.cardTitle}>{item.topic || "(untitled)"}</Text>
-              {item.source ? <Text style={styles.cardMeta}>{item.source}</Text> : null}
-              {item.snippet ? <Text style={styles.cardBody}>{item.snippet}</Text> : null}
+              {item.source ? (
+                /^https?:\/\//i.test(String(item.source)) ? (
+                  <UrlLink url={String(item.source)} label="source" />
+                ) : (
+                  <Text style={styles.cardMeta}>{item.source}</Text>
+                )
+              ) : null}
+              {item.snippet ? <Body>{String(item.snippet)}</Body> : null}
             </View>
           ))}
           <ListSection title="Liked / engaged with" items={presence.liked_or_engaged_with} />
@@ -358,18 +509,18 @@ export default function PersonDetail() {
 
           {/* 4. Contact + CRM */}
           <SectionTitle>Reach out</SectionTitle>
-          <Fact label="LinkedIn" value={linkedin} />
-          <Fact label="Email" value={contact.email} />
-          <Fact label="Phone" value={contact.phone} />
-          <Fact label="GitHub" value={contact.github_username} />
           {linkedin ? (
-            <Button title="Open LinkedIn" variant="ember" onPress={() => Linking.openURL(linkedin)} style={{ marginTop: 10 }} />
+            <>
+              <Text style={styles.factLabel}>LinkedIn</Text>
+              <UrlLink url={linkedin} label="Open LinkedIn profile" />
+            </>
           ) : (
             <Body>No LinkedIn URL found yet.</Body>
           )}
-          {conv.message_angle ? (
-            <Text style={styles.outreach}>Suggested note: {conv.message_angle}</Text>
-          ) : null}
+          <Fact label="Email" value={contact.email} />
+          <Fact label="Phone" value={contact.phone} />
+          <Fact label="GitHub" value={contact.github_username} />
+          {conv.message_angle ? <Body>{`Suggested note: ${conv.message_angle}`}</Body> : null}
 
           <SectionTitle>Your notes</SectionTitle>
           <Field label="Note" value={note} onChangeText={setNote} placeholder="Met at TiE, follow up next week…" />
@@ -436,6 +587,15 @@ const styles = StyleSheet.create({
   company: { fontFamily: fonts.body, color: colors.muted, marginBottom: 4 },
   meta: { fontFamily: fonts.body, color: colors.leaf, marginBottom: space.md, fontSize: 13 },
   err: { color: colors.danger, fontFamily: fonts.bodyMed, marginBottom: 8 },
+  rateBox: {
+    marginBottom: 14,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.ember,
+    backgroundColor: "rgba(251,252,250,0.95)",
+  },
+  rateTitle: { fontFamily: fonts.bodySemi, color: colors.ink, marginBottom: 6, fontSize: 16 },
   factBlock: { marginBottom: 10 },
   factLabel: {
     fontFamily: fonts.bodyMed,

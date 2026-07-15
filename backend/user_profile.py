@@ -110,10 +110,21 @@ def _from_research_profile(data: dict[str, Any]) -> dict[str, Any]:
         affiliations.insert(0, data["company"])
 
     contact = data.get("contact") if isinstance(data.get("contact"), dict) else {}
+    # Prefer query-selected LinkedIn (Find Me pick) over rediscovered URLs
+    try:
+        from identity_lock import normalize_linkedin_url
+
+        q_li = normalize_linkedin_url((data.get("query") or {}).get("linkedin_url"))
+        if q_li:
+            contact = {**contact, "linkedin_url": q_li}
+    except Exception:
+        pass
     if not contact.get("linkedin_url"):
         for key in ("exa_search", "gemini_search", "linkedin_public"):
             src = sources.get(key) or {}
             url = src.get("linkedin_url") or (src.get("profile") or {}).get("url")
+            if not url and key == "gemini_search":
+                url = (src.get("social_profile_links") or {}).get("linkedin")
             if url:
                 contact = {**contact, "linkedin_url": url}
                 break
@@ -153,7 +164,19 @@ def _from_research_profile(data: dict[str, Any]) -> dict[str, Any]:
         },
         "summary_blurb": (summary.get("summary") or gemini.get("bio_summary") or "")[:1200],
         "notable_points": _cap_list(summary.get("notable_points") or [], 10),
+        # Keep rich briefing sections so My Profile can render the full dossier
+        "latest_summary": summary if summary.get("status") == "ok" or summary.get("summary") else None,
+        "public_presence": summary.get("public_presence") if isinstance(summary.get("public_presence"), dict) else {},
+        "senior_connections": _cap_list(summary.get("senior_connections") or [], 12),
+        "research_collaborators": _cap_list(summary.get("research_collaborators") or [], 12),
+        "awards_and_recognitions": _cap_list(summary.get("awards_and_recognitions") or [], 10),
+        "identity_confidence": summary.get("identity_confidence"),
+        "identity_notes": summary.get("identity_notes") or "",
+        "personal_info": personal if isinstance(personal, dict) else {},
     }
+    # Drop empty latest_summary placeholder
+    if not out.get("latest_summary"):
+        out.pop("latest_summary", None)
     return out
 
 
@@ -182,14 +205,26 @@ def profile_from_research(
     summary: dict[str, Any],
     sources: Optional[dict[str, Any]] = None,
     contact: Optional[dict[str, Any]] = None,
+    linkedin_url: Optional[str] = None,
 ) -> dict[str, Any]:
     """Build a YOU profile from a research summary (signup self-research)."""
+    contact_out = dict(contact or {})
+    if linkedin_url:
+        try:
+            from identity_lock import normalize_linkedin_url
+
+            li = normalize_linkedin_url(linkedin_url)
+            if li:
+                contact_out["linkedin_url"] = li
+        except Exception:
+            contact_out["linkedin_url"] = linkedin_url
     dump = {
         "name": name,
         "company": company,
         "latest_summary": summary,
         "latest_sources": sources or {},
-        "contact": contact or {},
+        "contact": contact_out,
+        "query": {"name": name, "company": company, "linkedin_url": linkedin_url or contact_out.get("linkedin_url")},
     }
     flat = _from_research_profile(dump)
     flat["crm"] = {

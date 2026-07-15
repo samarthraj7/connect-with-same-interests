@@ -56,6 +56,8 @@ class SearchOrchestrator:
 
         with ThreadPoolExecutor(max_workers=6) as pool:
             futures = {}
+            if query.linkedin_url:
+                print(f"  [orchestrator] identity lock linkedin={query.linkedin_url}", flush=True)
             if "github" not in skip:
                 futures["github"] = pool.submit(
                     github.search_github,
@@ -72,6 +74,7 @@ class SearchOrchestrator:
                     company=query.company,
                     university=query.university,
                     place=query.place,
+                    linkedin_url=query.linkedin_url,
                 )
             if "exa_search" not in skip:
                 futures["exa_search"] = pool.submit(
@@ -80,6 +83,7 @@ class SearchOrchestrator:
                     company=query.company,
                     university=query.university,
                     place=query.place,
+                    linkedin_url=query.linkedin_url,
                 )
             if "personal_info" not in skip:
                 futures["personal_info"] = pool.submit(
@@ -88,6 +92,7 @@ class SearchOrchestrator:
                     company=query.company,
                     university=query.university,
                     place=query.place,
+                    linkedin_url=query.linkedin_url,
                 )
             if "public_web" not in skip:
                 futures["public_web"] = pool.submit(
@@ -95,6 +100,7 @@ class SearchOrchestrator:
                     name=query.name,
                     company=query.company,
                     university=query.university,
+                    linkedin_url=query.linkedin_url,
                 )
             for source, future in futures.items():
                 results[source] = future.result()

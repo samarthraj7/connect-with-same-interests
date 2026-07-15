@@ -111,7 +111,15 @@ export const api = {
   updateProfile: (body: Record<string, unknown>) =>
     request<UserPublic>("/me/profile", { method: "PATCH", body: JSON.stringify(body) }),
   researchMe: (body: Record<string, unknown> = {}) =>
-    request<{ status: string; user: UserPublic }>("/me/research", {
+    request<{
+      status: string;
+      user: UserPublic;
+      needs_rating?: boolean;
+      draft_id?: string | null;
+      summary?: Record<string, any>;
+      name?: string;
+      company?: string | null;
+    }>("/me/research", {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -122,6 +130,17 @@ export const api = {
     }),
   research: (body: Record<string, unknown>) =>
     request<any>("/research", { method: "POST", body: JSON.stringify(body) }),
+  researchDraft: (draftId: string) => request<any>(`/research/drafts/${encodeURIComponent(draftId)}`),
+  researchFeedback: (body: {
+    draft_id: string;
+    rating: "good" | "bad";
+    wrong_notes?: string;
+    wrong_categories?: string[];
+  }) =>
+    request<any>("/research/feedback", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   people: () => request<{ people: any[] }>("/people"),
   person: (name: string, company?: string | null) => {
     const q = company ? `?company=${encodeURIComponent(company)}` : "";

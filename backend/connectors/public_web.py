@@ -37,13 +37,19 @@ def search_public_presence(
     name: str,
     company: Optional[str] = None,
     university: Optional[str] = None,
+    linkedin_url: Optional[str] = None,
 ) -> dict[str, Any]:
+    from identity_lock import linkedin_slug, normalize_linkedin_url
+
     api_key = (os.environ.get("EXA_API_KEY") or "").strip()
     if not api_key:
         return {"status": "skipped", "reason": "EXA_API_KEY not set"}
 
     headers = {"x-api-key": api_key, "Content-Type": "application/json"}
+    slug = linkedin_slug(normalize_linkedin_url(linkedin_url))
     base = f"{name} {company or university or ''}".strip()
+    if slug:
+        base = f"{base} {slug}".strip()
 
     queries = [
         f"{base} personal website OR portfolio OR homepage -site:linkedin.com",
@@ -51,7 +57,7 @@ def search_public_presence(
         f"{base} blog OR newsletter OR talks OR speaking",
     ]
 
-    print(f"  [public_web] portfolio / open-web dig for {name!r}")
+    print(f"  [public_web] portfolio / open-web dig for {name!r} (slug={slug!r})")
     all_hits: List[dict] = []
     seen = set()
     for q in queries:
@@ -76,6 +82,7 @@ def search_public_presence(
         "writing_and_talks": blogs[:8],
         "other_public_pages": other[:8],
         "count": len(all_hits),
+        "canonical_linkedin_url": normalize_linkedin_url(linkedin_url),
     }
 
 

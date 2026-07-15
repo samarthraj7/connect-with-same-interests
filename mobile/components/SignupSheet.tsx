@@ -15,7 +15,7 @@ import { api, API_BASE } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { fonts, space } from "../lib/theme";
 import { useTheme } from "../lib/theme-context";
-import { Button, ChipInput, Field } from "./ui";
+import { Body, Button, ChipInput, Field } from "./ui";
 
 type Props = { visible: boolean; onClose: () => void };
 
@@ -106,6 +106,10 @@ export function SignupSheet({ visible, onClose }: Props) {
   const [interests, setInterests] = useState<string[]>([]);
   const [sports, setSports] = useState<string[]>([]);
   const [headline, setHeadline] = useState("");
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const [researchSummary, setResearchSummary] = useState("");
+  const [ratingNotes, setRatingNotes] = useState("");
+  const [awaitingRating, setAwaitingRating] = useState(false);
 
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -240,12 +244,22 @@ export function SignupSheet({ visible, onClose }: Props) {
         force_refresh: true,
       });
       await refresh();
+      if (researched.needs_rating && researched.draft_id) {
+        setDraftId(researched.draft_id);
+        setResearchSummary(researched.summary?.summary || "");
+        setAwaitingRating(true);
+        setHeadline(picked?.role || "");
+        stopProgress(true);
+        setStep(4);
+        return;
+      }
       const p = researched.user?.profile || {};
       setHeadline(p.headline || picked?.role || "");
       setHobbies(p.hobbies || hobbies);
       setInterests(p.interests || interests);
       setSports(p.sports || sports);
-      // Mark claim on public dossier via profile fields already set by researchMe
+      setAwaitingRating(false);
+      setDraftId(null);
       stopProgress(true);
       setStep(4);
     } catch (e: any) {
@@ -261,6 +275,11 @@ export function SignupSheet({ visible, onClose }: Props) {
     setLoading(true);
     setError("");
     try {
+      if (awaitingRating && draftId) {
+        setError("Rate the research Good or Bad before finishing.");
+        setLoading(false);
+        return;
+      }
       await api.updateProfile({ headline, hobbies, interests, sports });
       if (privateDraft.trim()) {
         await api.addPrivateJournal({ body: privateDraft.trim(), entry_type: "blog" });
@@ -269,6 +288,38 @@ export function SignupSheet({ visible, onClose }: Props) {
       onClose();
     } catch (e: any) {
       setError(e.message || "Could not save");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const rateDraft = async (rating: "good" | "bad") => {
+    if (!draftId) return;
+    setLoading(true);
+    setError("");
+    try {
+      const res = await api.researchFeedback({
+        draft_id: draftId,
+        rating,
+        wrong_notes: rating === "bad" ? ratingNotes.trim() || undefined : undefined,
+        wrong_categories: rating === "bad" ? ["self_research"] : undefined,
+      });
+      if (rating === "bad") {
+        setAwaitingRating(false);
+        setDraftId(null);
+        setError(res.message || "Discarded. You can close and try research again later.");
+        return;
+      }
+      const p = res.user?.profile || {};
+      setHeadline(p.headline || headline || picked?.role || "");
+      setHobbies(p.hobbies || hobbies);
+      setInterests(p.interests || interests);
+      setSports(p.sports || sports);
+      setAwaitingRating(false);
+      setDraftId(null);
+      await refresh();
+    } catch (e: any) {
+      setError(e.message || "Could not submit rating");
     } finally {
       setLoading(false);
     }
@@ -398,6 +449,32 @@ export function SignupSheet({ visible, onClose }: Props) {
 
               {step === 4 && (
                 <View>
+                  {awaitingRating ? (
+                    <View style={{ marginBottom: 14 }}>
+                      <Text style={{ fontFamily: fonts.bodySemi, color: colors.ember, marginBottom: 6 }}>
+                        Rate this research
+                      </Text>
+                      {researchSummary ? (
+                        <View style={{ marginBottom: 10 }}>
+                          <Body>{researchSummary}</Body>
+                        </View>
+                      ) : null}
+                      <Text style={{ fontFamily: fonts.body, color: colors.muted, marginBottom: 8, lineHeight: 18 }}>
+                        Good saves your public dossier. Bad discards it — tell us what was wrong so the next run improves.
+                      </Text>
+                      <Field
+                        label="If bad — what was wrong? (optional until you tap Bad)"
+                        value={ratingNotes}
+                        onChangeText={setRatingNotes}
+                        placeholder="Wrong person, wrong company, mixed with someone else…"
+                        multiline
+                      />
+                      <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                        <Button title="Good — save" variant="ember" loading={loading} onPress={() => rateDraft("good")} style={{ flex: 1 }} />
+                        <Button title="Bad" variant="ghost" loading={loading} onPress={() => rateDraft("bad")} style={{ flex: 1 }} />
+                      </View>
+                    </View>
+                  ) : null}
                   <Text style={{ fontFamily: fonts.bodySemi, color: colors.forest, marginBottom: 6 }}>Public profile</Text>
                   <Text style={{ fontFamily: fonts.body, color: colors.muted, marginBottom: 10, lineHeight: 20 }}>
                     This dossier is what others see when they search you — career, portfolios, writing, not private journals.
@@ -446,7 +523,7 @@ export function SignupSheet({ visible, onClose }: Props) {
               {step === 2 && (
                 <Button title="Create account & research" onPress={createAndResearch} loading={loading} variant="ember" />
               )}
-              {step === 4 && <Button title="Finish" onPress={finish} loading={loading} variant="ember" />}
+              {step === 4 && !awaitingRating && <Button title="Finish" onPress={finish} loading={loading} variant="ember" />}
               {step > 0 && step < 3 ? (
                 <Button title="Back" variant="ghost" onPress={() => setStep((s) => s - 1)} disabled={loading} />
               ) : null}

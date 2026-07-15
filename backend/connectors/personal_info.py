@@ -139,12 +139,13 @@ def search_personal_info(
     company: Optional[str] = None,
     university: Optional[str] = None,
     place: Optional[str] = None,
+    linkedin_url: Optional[str] = None,
 ) -> dict:
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         return {"status": "skipped", "reason": "GEMINI_API_KEY not set"}
 
-    context = _context_line(name, company, university, place)
+    context = _context_line(name, company, university, place, linkedin_url=linkedin_url)
     print(f"  [personal_info] biographical research dig for {name!r}")
 
     client = genai.Client(api_key=api_key)
@@ -163,15 +164,22 @@ def _context_line(
     company: Optional[str],
     university: Optional[str],
     place: Optional[str],
+    linkedin_url: Optional[str] = None,
 ) -> str:
-    bits = [f'- Name: "{name}"']
+    from identity_lock import identity_lock_text, normalize_linkedin_url
+
+    bits = [identity_lock_text(name=name, linkedin_url=linkedin_url, company=company, university=university)]
+    bits.append(f'- Name: "{name}"')
+    li = normalize_linkedin_url(linkedin_url)
+    if li:
+        bits.append(f'- Canonical LinkedIn: {li}')
     if company:
         bits.append(f'- Company/org: "{company}"')
     if university:
         bits.append(f'- University/school: "{university}"')
     if place:
         bits.append(f'- Place hint: "{place}"')
-    if len(bits) == 1:
+    if len(bits) <= 2 and not li and not company and not university:
         bits.append("- (no extra disambiguation hints)")
     return "\n".join(bits)
 
