@@ -5,26 +5,38 @@ import { Platform } from "react-native";
 const TOKEN_KEY = "cd_token";
 const USER_KEY = "cd_user";
 
-/**
- * WHERE TO UPDATE THE API URL (physical phone / Expo Go):
- * 1) This file — DEV_API_URL below (fastest; reload the app after changing)
- * 2) mobile/.env — EXPO_PUBLIC_API_URL=http://YOUR_MAC_LAN_IP:8000
- *    then restart Expo: cd mobile && npx expo start -c
- *
- * Find your Mac IP:  ipconfig getifaddr en0
- * API must bind all interfaces:  uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+/*
+ * WHERE TO SET THE API URL
+ * Laptop / simulator / web: leave DEV_API_URL empty and do not set
+ * EXPO_PUBLIC_API_URL — uses http://127.0.0.1:8000 automatically.
+ * Physical phone (Expo Go): set mobile/.env to your Mac LAN IP, then npx expo start -c
+ * API: uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
  */
-const DEV_API_URL = ""; // e.g. "http://192.168.1.10:8000" for a physical device
+const DEV_API_URL = ""; // leave empty for laptop; only override for physical-device testing
+
+function isLocalDevHost(): boolean {
+  // Web, iOS Simulator, Android Emulator — never need a LAN IP
+  if (Platform.OS === "web") return true;
+  // Constants.isDevice === false → simulator/emulator
+  if (Constants.isDevice === false) return true;
+  return false;
+}
 
 function defaultBaseUrl(): string {
-  // 1) Explicit override for physical devices (edit DEV_API_URL above when Wi‑Fi IP changes)
+  // 1) Hard override (physical device testing only)
   if (DEV_API_URL) return DEV_API_URL.replace(/\/$/, "");
 
-  // 2) Expo env (requires restart of Metro after editing mobile/.env)
+  // 2) Explicit env (physical phone). Prefer leaving unset on laptop.
   const fromEnv = process.env.EXPO_PUBLIC_API_URL;
-  if (fromEnv) return fromEnv.replace(/\/$/, "");
+  if (fromEnv && !isLocalDevHost()) return fromEnv.replace(/\/$/, "");
 
-  // 3) Same host Expo Metro is using (often wrong / stale on campus Wi‑Fi)
+  // 3) Laptop / simulator / web → localhost (no Wi‑Fi IP churn)
+  if (isLocalDevHost()) {
+    if (Platform.OS === "android") return "http://10.0.2.2:8000";
+    return "http://127.0.0.1:8000";
+  }
+
+  // 4) Physical device: Expo Metro host IP on :8000
   const hostUri = Constants.expoConfig?.hostUri;
   const host = hostUri?.split(":")[0];
   if (host && host !== "127.0.0.1" && host !== "localhost") {
@@ -124,7 +136,15 @@ export const api = {
       body: JSON.stringify(body),
     }),
   candidates: (name: string) =>
-    request<{ candidates: any[]; status: string }>("/candidates", {
+    request<{
+      candidates: any[];
+      exact?: any[];
+      probable?: any[];
+      match_mode?: "exact" | "probable_only" | "none";
+      message?: string;
+      status: string;
+      warning?: string;
+    }>("/candidates", {
       method: "POST",
       body: JSON.stringify({ name }),
     }),

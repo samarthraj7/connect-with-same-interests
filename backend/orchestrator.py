@@ -30,11 +30,10 @@ class PersonQuery:
 
 
 class SearchOrchestrator:
-    """Fans out to connectors not in `skip`.
+    """Fans out to connectors, then runs the deep agent + one-shot social discovery.
 
-    Priority: Apollo (licensed) → GitHub / patents → Gemini/Exa / personal_info /
-    public_web (portfolios & open Google-indexable pages) → optional LinkedIn public
-    → opt-in social scrapers (once).
+    Priority: Apollo → parallel Gemini/Exa/personal/public_web/GitHub → LinkedIn public
+    → deep_agent (multi-hop) → social scrapers (1 Google attempt each via social_find).
     """
 
     def run(self, query: PersonQuery, skip: FrozenSet[str] = frozenset()) -> dict:
@@ -49,10 +48,42 @@ class SearchOrchestrator:
                 linkedin_url=query.linkedin_url,
                 email=query.email,
             )
-            # Prefer Apollo LinkedIn URL for later waves
             if results["apollo"].get("status") == "ok" and results["apollo"].get("linkedin_url"):
                 if not query.linkedin_url:
                     query.linkedin_url = results["apollo"]["linkedin_url"]
+
+        # Wave 0a — A-Leads contact email/phone (after identity hints; not for Find Me photos)
+        if "aleads" not in skip:
+            try:
+                from connectors import aleads
+
+                if aleads.configured():
+                    print("  [orchestrator] aleads contact enrich…", flush=True)
+                    results["aleads"] = aleads.enrich_contact(
+                        name=query.name,
+                        company=query.company,
+                        domain=query.domain,
+                        linkedin_url=query.linkedin_url,
+                    )
+                    al = results["aleads"]
+                    if al.get("status") == "ok" and al.get("linkedin_url") and not query.linkedin_url:
+                        query.linkedin_url = al["linkedin_url"]
+            except Exception as exc:
+                results["aleads"] = {"status": "error", "error": str(exc)[:200]}
+
+        # Wave 0b — Enrich Layer profile when LinkedIn known (fills photo / title)
+        if query.linkedin_url and "enrichlayer" not in skip:
+            try:
+                from connectors import enrichlayer
+
+                if enrichlayer.configured():
+                    el = enrichlayer.fetch_profile(query.linkedin_url, timeout=15)
+                    results["enrichlayer"] = el
+                    if el.get("status") == "ok":
+                        if el.get("linkedin_url") and not query.linkedin_url:
+                            query.linkedin_url = el["linkedin_url"]
+            except Exception as exc:
+                results["enrichlayer"] = {"status": "error", "error": str(exc)[:200]}
 
         with ThreadPoolExecutor(max_workers=6) as pool:
             futures = {}
@@ -110,7 +141,7 @@ class SearchOrchestrator:
         if gemini_result is None and exa_result is None and apollo_result.get("status") != "ok":
             return results
 
-        social_links = (gemini_result or {}).get("social_profile_links") or {}
+        social_links = dict((gemini_result or {}).get("social_profile_links") or {})
         linkedin_url = (
             query.linkedin_url
             or apollo_result.get("linkedin_url")
@@ -121,6 +152,29 @@ class SearchOrchestrator:
         if "linkedin_public" not in skip:
             results["linkedin_public"] = linkedin_public.fetch_linkedin_public(linkedin_url)
 
+        # Wave — deep agent (after identity chosen + baseline connectors)
+        if "deep_agent" not in skip:
+            try:
+                from deep_agent import run_deep_agent
+
+                print("  [orchestrator] deep_agent layer…", flush=True)
+                deep = run_deep_agent(
+                    name=query.name,
+                    company=query.company,
+                    university=query.university,
+                    place=query.place,
+                    linkedin_url=linkedin_url or query.linkedin_url,
+                    seed_sources=results,
+                )
+                results["deep_agent"] = deep
+                # Merge discovered socials into links for scrapers
+                for k, v in (deep.get("social_profile_links") or {}).items():
+                    if v and not social_links.get(k):
+                        social_links[k] = v
+            except Exception as exc:
+                results["deep_agent"] = {"status": "error", "error": str(exc)[:300]}
+                print(f"  [orchestrator] deep_agent error: {exc}", flush=True)
+
         linkedin_result = results.get("linkedin_public") or {}
         identity_hints = {
             "current_role": apollo_result.get("title")
@@ -130,6 +184,7 @@ class SearchOrchestrator:
             "linkedin_about": linkedin_result.get("about"),
         }
 
+        # Social scrapers — discovery already 1-attempt via social_find inside fetch_*
         with ThreadPoolExecutor(max_workers=3) as pool:
             futures = {}
             if "instagram_public" not in skip:

@@ -25,7 +25,8 @@ MODEL = os.environ.get("GEMINI_MODEL") or "gemini-2.5-flash"
 SCRAPECREATORS_BASE = "https://api.scrapecreators.com"
 TIMEOUT = 20
 REDIRECT_TIMEOUT = 8
-MAX_GOOGLE_ATTEMPTS = 4
+# One Google attempt per platform (Deepsearch-style speed; avoid 3–4 retries)
+MAX_GOOGLE_ATTEMPTS = int(os.environ.get("SOCIAL_FIND_MAX_ATTEMPTS") or "1")
 
 PLATFORM_HOSTS = {
     "instagram": ("instagram.com",),

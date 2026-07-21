@@ -68,16 +68,11 @@ def find_linkedin_people_by_name(name: str, *, max_people: int = 8) -> dict:
         scored.append(cand)
         print(f"    score={score:.2f} name={cand.get('name')!r} li={cand.get('linkedin_url')}", flush=True)
 
-    # Prefer strong name matches; pad with medium for disambiguation UI
-    strong = sorted([c for c in scored if c["_score"] >= 0.45], key=lambda x: -x["_score"])
-    medium = sorted([c for c in scored if 0.25 <= c["_score"] < 0.45], key=lambda x: -x["_score"])
-    picked = strong[:max_people]
-    if len(picked) < min(3, max_people):
-        picked.extend(medium[: max_people - len(picked)])
-    if not picked:
-        picked = sorted(scored, key=lambda x: -x["_score"])[:max_people]
-    for c in picked:
-        c.pop("_score", None)
+    # Keep scores for exact/probable partition upstream; drop very weak noise.
+    ranked = sorted(scored, key=lambda x: -x["_score"])
+    picked = [c for c in ranked if c["_score"] >= 0.25][: max(max_people * 2, max_people)]
+    if not picked and ranked:
+        picked = ranked[:max_people]
 
     print(f"[exa linkedin-people] DONE count={len(picked)} (from {len(raw_hits)} hits)", flush=True)
     return {

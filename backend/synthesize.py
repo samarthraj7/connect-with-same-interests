@@ -20,7 +20,8 @@ The Aggregated data includes a "query" object with the selected person's name / 
 - Treat query.linkedin_url as the CANONICAL identity when present.
 - Discard facts that clearly belong to a different person with the same name (different LinkedIn URL, incompatible employer timeline, conflicting education).
 - If gemini_search or exa_search disagree on linkedin_url, prefer query.linkedin_url and ignore conflicting source blobs.
-- Prefer apollo + linkedin_public + sources that agree with the canonical LinkedIn / company.
+- Prefer apollo + aleads + linkedin_public + deep_agent.evidence + sources that agree with the canonical LinkedIn / company.
+When deep_agent.evidence is present, treat those cited facts as high-priority inputs for summary / career / interests.
 
 ### SECTION 1: IDENTITY CROSS-CHECKING & CONFIDENCE
 Before parsing career or public data, cross-reference identity markers across sources:
@@ -215,7 +216,10 @@ def _compact_value(value, depth: int):
             if k in {"raw", "raw_text", "apidirect_posts", "candidates", "search_history"}:
                 continue
             if k == "evidence" and isinstance(v, list):
-                out[k] = _cap_list(v, 12)
+                out[k] = _cap_list(v, 24)
+                continue
+            if k == "search_trail" and isinstance(v, list):
+                out[k] = _cap_list(v, 4)
                 continue
             if k == "milestone_answers" and isinstance(v, dict):
                 out[k] = {
