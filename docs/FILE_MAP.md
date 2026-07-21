@@ -28,14 +28,11 @@ Purpose of each **source** file in the repo (excludes `node_modules/`, local `us
 
 | File | Use |
 |------|-----|
-| `orchestrator.py` | Fans out a `PersonQuery` to connectors in waves (Apollo → A-Leads contact → Enrich Layer → parallel Gemini/Exa/personal/public_web/GitHub → LinkedIn public → deep_agent → optional socials) |
+| `orchestrator.py` | Fans out a `PersonQuery` to connectors in waves (Apollo → parallel Gemini/Exa/personal/public_web/GitHub → LinkedIn public → optional socials) |
 | `merge.py` | Combines connector results into one `sources` + `query` document for synthesis |
 | `synthesize.py` | Gemini briefing: identity lock, citations, structured JSON summary |
 | `common_ground.py` | Detailed-tier conversation engine (talk topics / openers from YOU vs THEM) |
-| `face_match.py` | Gemini vision: LinkedIn headshot vs Instagram (etc.) profile photos |
-| `person_chat.py` | Grounded Q&A over dossier + conversation ideas |
 | `identity_lock.py` | Normalize LinkedIn URLs, same-person checks, identity lock prompt text |
-| `name_match.py` | Exact vs probable Find Me name matching |
 | `research_drafts.py` | Save/load/delete ephemeral drafts under `profiles/_drafts/` until rated |
 | `research_feedback.py` | Record good/bad ratings, prior bad corrections for next synthesize, optional Supabase |
 | `storage.py` | People profile files: save/load, freshness, contact seeding (canonical LinkedIn wins) |
@@ -66,7 +63,6 @@ Purpose of each **source** file in the repo (excludes `node_modules/`, local `us
 |------|-----|
 | `connectors/__init__.py` | Package marker |
 | `apollo.py` | Apollo.io people enrich (email, title, LinkedIn, photo hints) |
-| `aleads.py` | A-Leads post-pick work email (+ optional phone); not Find Me photos |
 | `enrichlayer.py` | Enrich Layer LinkedIn photo / profile by URL (Find Me photos) |
 | `exa_search.py` | Exa: LinkedIn people-by-name (Find Me), deep mentions + LinkedIn URL lock |
 | `gemini_search.py` | Gemini Google Search angles; Find Me candidate fallback; photo hunt helpers |
@@ -75,7 +71,7 @@ Purpose of each **source** file in the repo (excludes `node_modules/`, local `us
 | `github.py` | GitHub user/repo search |
 | `patents.py` | PatentsView inventor search |
 | `linkedin_public.py` | Logged-out single LinkedIn public profile fetch (optional flag) |
-| `instagram.py` / `facebook.py` / `twitter.py` | Opt-in social scrapers; Instagram uses multi-candidate Google + face match vs LinkedIn photo |
+| `instagram.py` / `facebook.py` / `twitter.py` | Opt-in social scrapers (`fetch_social`) |
 | `social_find.py` | Discover likely social handles |
 | `social_verify.py` | Score whether a social profile matches the person |
 | `opengraph.py` | Fetch OG image / meta for photo enrichment |
