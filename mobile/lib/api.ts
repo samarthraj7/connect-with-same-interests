@@ -166,6 +166,19 @@ export const api = {
     const q = company ? `?company=${encodeURIComponent(company)}` : "";
     return request<any>(`/people/${encodeURIComponent(name)}${q}`);
   },
+  personChat: (
+    name: string,
+    body: {
+      question: string;
+      company?: string | null;
+      draft_id?: string | null;
+      history?: { role: string; content: string }[];
+    },
+  ) =>
+    request<{ status: string; answer: string; name?: string; company?: string | null }>(
+      `/people/${encodeURIComponent(name)}/chat`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
   addNote: (name: string, note: string, company?: string | null) => {
     const q = company ? `?company=${encodeURIComponent(company)}` : "";
     return request(`/people/${encodeURIComponent(name)}/interactions${q}`, {

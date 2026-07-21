@@ -176,12 +176,23 @@ class SearchOrchestrator:
                 print(f"  [orchestrator] deep_agent error: {exc}", flush=True)
 
         linkedin_result = results.get("linkedin_public") or {}
+        el_result = results.get("enrichlayer") if isinstance(results.get("enrichlayer"), dict) else {}
+        photo_url = (
+            apollo_result.get("photo_url")
+            or el_result.get("profile_pic_url")
+            or el_result.get("photo_url")
+            or (el_result.get("profile") or {}).get("profile_pic_url")
+            or linkedin_result.get("photo_url")
+            or linkedin_result.get("profile_pic_url")
+        )
         identity_hints = {
             "current_role": apollo_result.get("title")
             or (gemini_result or {}).get("current_role"),
             "bio_summary": (gemini_result or {}).get("bio_summary"),
             "linkedin_headline": linkedin_result.get("headline") or apollo_result.get("headline"),
             "linkedin_about": linkedin_result.get("about"),
+            "photo_url": photo_url,
+            "linkedin_photo_url": photo_url,
         }
 
         # Social scrapers — discovery already 1-attempt via social_find inside fetch_*

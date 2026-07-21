@@ -54,63 +54,212 @@ def find_profile_link(
     company: Optional[str] = None,
     known_url: Optional[str] = None,
 ) -> dict:
-    """Find a profile URL/handle: 4 Google attempts, then ScrapeCreators name-only."""
-    platform = platform.lower().strip()
-    if platform not in PLATFORM_HOSTS:
-        return {"status": "error", "error": f"unsupported platform: {platform}"}
-
-    attempts: List[dict] = []
-
-    if known_url:
-        resolved = _resolve_url(known_url)
-        if _is_profile_url(resolved, platform):
-            handle = _handle_from_url(resolved, platform)
-            return {
-                "status": "ok",
-                "url": resolved,
-                "handle": handle,
-                "method": "known_url",
-                "query": None,
-                "attempts": attempts,
-                "grounding_urls": [],
-            }
-
-    for i, query in enumerate(_google_queries(name, platform, company), start=1):
-        print(f"  [social] Google attempt {i}/{MAX_GOOGLE_ATTEMPTS}: {query!r}")
-        hit = _google_first_profile(query, platform, name)
-        ok = isinstance(hit, dict) and hit.get("status") == "ok"
-        attempt_rec = {
-            "attempt": i,
-            "query": query,
-            "success": ok,
-            "grounding_urls": (hit or {}).get("grounding_urls") or [],
-            "raw_grounding": (hit or {}).get("raw_grounding") or [],
+    """Find a profile URL/handle: Google attempts, then ScrapeCreators name-only."""
+    multi = find_profile_candidates(name, platform, company=company, known_url=known_url, max_candidates=1)
+    cands = multi.get("candidates") or []
+    if cands:
+        top = cands[0]
+        return {
+            "status": "ok",
+            "url": top.get("url"),
+            "handle": top.get("handle"),
+            "method": top.get("method") or multi.get("method"),
+            "query": multi.get("query"),
+            "attempts": multi.get("attempts") or [],
+            "grounding_urls": multi.get("grounding_urls") or [],
+            "candidates": cands,
         }
-        attempts.append(attempt_rec)
-        if ok:
-            hit["attempts"] = attempts
-            print(f"  [social] caught URL on attempt {i}: {hit.get('url')}")
-            return hit
-
-    # Fallback: ScrapeCreators with JUST the name (no company, no operators)
-    print(f"  [social] Google failed after {MAX_GOOGLE_ATTEMPTS} tries — ScrapeCreators name-only: {name!r}")
-    sc_hit = _scrapecreators_name_search(name, platform)
-    if sc_hit:
-        sc_hit["attempts"] = attempts
-        sc_hit["method"] = "scrapecreators_name_only"
-        print(f"  [social] ScrapeCreators name hit -> {sc_hit.get('url')} (@{sc_hit.get('handle')})")
-        return sc_hit
-
     return {
         "status": "not_found",
         "url": None,
         "handle": None,
-        "method": "exhausted",
+        "method": multi.get("method") or "exhausted",
         "query": None,
-        "attempts": attempts,
-        "grounding_urls": [],
-        "reason": f"no {platform} profile URL after {MAX_GOOGLE_ATTEMPTS} Google attempts + ScrapeCreators name search",
+        "attempts": multi.get("attempts") or [],
+        "grounding_urls": multi.get("grounding_urls") or [],
+        "reason": multi.get("reason")
+        or f"no {platform} profile URL after Google + ScrapeCreators",
+        "candidates": [],
     }
+
+
+def find_profile_candidates(
+    name: str,
+    platform: str,
+    company: Optional[str] = None,
+    known_url: Optional[str] = None,
+    max_candidates: int = 10,
+) -> dict:
+    """Collect up to N profile candidates from Google grounding + ScrapeCreators."""
+    platform = platform.lower().strip()
+    if platform not in PLATFORM_HOSTS:
+        return {"status": "error", "error": f"unsupported platform: {platform}", "candidates": []}
+
+    max_candidates = max(1, min(int(max_candidates or 10), 12))
+    attempts: List[dict] = []
+    seen: set = set()
+    candidates: List[dict] = []
+
+    def _add(url: Optional[str], *, method: str, title: Optional[str] = None, handle: Optional[str] = None):
+        if len(candidates) >= max_candidates:
+            return
+        resolved = _resolve_url(url) if url else None
+        h = (handle or _handle_from_url(resolved or "", platform) or "").lstrip("@").strip()
+        if not h and resolved and _is_profile_url(resolved, platform):
+            h = _handle_from_url(resolved, platform) or ""
+        if not h:
+            return
+        key = h.lower()
+        if key in seen:
+            return
+        if resolved and not _is_profile_url(resolved, platform):
+            resolved = _url_for_handle(h, platform)
+        if not resolved:
+            resolved = _url_for_handle(h, platform)
+        seen.add(key)
+        candidates.append(
+            {
+                "handle": h,
+                "url": resolved,
+                "method": method,
+                "title": title,
+            }
+        )
+
+    if known_url:
+        resolved = _resolve_url(known_url)
+        if _is_profile_url(resolved, platform):
+            _add(resolved, method="known_url")
+
+    for i, query in enumerate(_google_queries(name, platform, company), start=1):
+        if len(candidates) >= max_candidates:
+            break
+        print(f"  [social] Google candidates attempt {i}/{MAX_GOOGLE_ATTEMPTS}: {query!r}")
+        hit = _google_collect_profiles(query, platform, name, limit=max_candidates)
+        ok = bool((hit or {}).get("candidates"))
+        attempts.append(
+            {
+                "attempt": i,
+                "query": query,
+                "success": ok,
+                "count": len((hit or {}).get("candidates") or []),
+                "grounding_urls": (hit or {}).get("grounding_urls") or [],
+            }
+        )
+        for c in (hit or {}).get("candidates") or []:
+            _add(c.get("url"), method=c.get("method") or "google", title=c.get("title"), handle=c.get("handle"))
+
+    if len(candidates) < max_candidates and platform == "instagram":
+        print(f"  [social] ScrapeCreators name search for more IG candidates: {name!r}")
+        sc_hit = _scrapecreators_name_search(name, platform)
+        if sc_hit and sc_hit.get("handle"):
+            _add(sc_hit.get("url"), method="scrapecreators_name_only", handle=sc_hit.get("handle"))
+            for extra in sc_hit.get("scrapecreators_candidates") or []:
+                _add(
+                    None,
+                    method="scrapecreators_search",
+                    handle=extra.get("username") or extra.get("handle"),
+                    title=extra.get("full_name"),
+                )
+
+    if not candidates:
+        return {
+            "status": "not_found",
+            "candidates": [],
+            "method": "exhausted",
+            "attempts": attempts,
+            "grounding_urls": [],
+            "reason": f"no {platform} candidates after Google + ScrapeCreators",
+        }
+
+    print(f"  [social] {platform} candidates={len(candidates)}: {[c['handle'] for c in candidates]}", flush=True)
+    return {
+        "status": "ok",
+        "candidates": candidates[:max_candidates],
+        "method": "multi_candidate",
+        "attempts": attempts,
+        "grounding_urls": (attempts[0].get("grounding_urls") if attempts else []) or [],
+        "query": (attempts[0].get("query") if attempts else None),
+    }
+
+
+def _google_collect_profiles(query: str, platform: str, name: str, *, limit: int = 10) -> Optional[dict]:
+    """Google Search → many profile URLs (grounding + model JSON list)."""
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return None
+
+    prompt = (
+        f"Use Google Search with this query: {query}\n\n"
+        f"List up to {limit} distinct {platform} PROFILE page URLs for people who might be named {name}. "
+        "Prefer personal profiles, not posts/reels/explore.\n"
+        "Return ONLY strict JSON, no markdown:\n"
+        '{"profiles":[{"profile_url": string, "handle": string or null, "title": string or null}]}\n'
+        "Rules:\n"
+        "- profile_url must be https on "
+        f"{', '.join(PLATFORM_HOSTS[platform])}.\n"
+        "- Do NOT invent handles. Empty list is OK if nothing matches."
+    )
+    try:
+        client = genai.Client(api_key=api_key)
+        response = generate_with_retry(
+            client,
+            model=MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())]),
+        )
+    except (errors.ClientError, errors.ServerError) as exc:
+        print(f"  [social] Google multi call failed: {exc}")
+        return None
+
+    raw_grounding = _grounding_urls(response)
+    resolved_grounding: List[Tuple[str, str]] = []
+    for url, title in raw_grounding:
+        final = _resolve_url(url)
+        resolved_grounding.append((final, title))
+
+    collected: List[dict] = []
+    seen: set = set()
+
+    def push(url: str, method: str, title: Optional[str] = None, handle: Optional[str] = None):
+        if len(collected) >= limit:
+            return
+        if not _is_profile_url(url, platform):
+            return
+        h = (handle or _handle_from_url(url, platform) or "").lower()
+        if not h or h in seen:
+            return
+        seen.add(h)
+        collected.append(
+            {
+                "url": url,
+                "handle": _handle_from_url(url, platform),
+                "title": title,
+                "method": method,
+            }
+        )
+
+    for url, title in resolved_grounding:
+        push(url, "google_grounding", title)
+        h = _handle_from_title(title or "", platform)
+        if h:
+            push(_url_for_handle(h, platform), "google_grounding_title", title, h)
+
+    parsed = _parse_json(response.text or "")
+    for row in (parsed or {}).get("profiles") or []:
+        if not isinstance(row, dict):
+            continue
+        url = _resolve_url(row.get("profile_url") or "")
+        push(url, "google_model_json", row.get("title"), row.get("handle"))
+
+    for match_url in _urls_in_text(response.text or "", platform):
+        push(_resolve_url(match_url), "google_text_scan")
+
+    return {
+        "candidates": collected,
+        "grounding_urls": [{"url": u, "title": t} for u, t in resolved_grounding[:12]],
+    }
+
 
 
 def _google_queries(name: str, platform: str, company: Optional[str]) -> List[str]:

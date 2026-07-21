@@ -37,8 +37,11 @@ Connect Deeply turns “I’ve got 5 minutes before we meet” into an identity-
 3. **Deep research** — connectors fan out (Apollo, A-Leads contact email, Gemini Search, Exa, personal milestones, public web, GitHub, …)  
 4. **Synthesize** — Gemini turns sources into a structured briefing with cited sources  
 5. **Common ground** (detailed tier) — talk topics / openers from *your* profile vs *theirs* (overlap kept internal; UI shows conversation ideas)  
-6. **Good / bad rating** — draft first; **Good** saves to people DB; **Bad** discards and stores corrections for the next run  
-7. **You at signup** — research *yourself* the same way, then rate and own your public dossier + private journal  
+6. **Ask about them** — chat on the person screen, grounded only in the dossier + conversation ideas  
+7. **Good / bad rating** — draft first; **Good** saves to people DB; **Bad** discards and stores corrections for the next run  
+8. **You at signup** — research *yourself* the same way, then rate and own your public dossier + private journal  
+
+Instagram (when `fetch_social`) collects multiple Google candidates and ranks them with **face matching** against the LinkedIn photo when available.
 
 Token costs (API): **basic = 1**, **detailed = 3**. New accounts start with `STARTING_TOKENS` (default **15**).
 

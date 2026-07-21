@@ -137,6 +137,13 @@ class InteractionBody(BaseModel):
     meta: dict[str, Any] = {}
 
 
+class PersonChatBody(BaseModel):
+    question: str
+    company: Optional[str] = None
+    draft_id: Optional[str] = None
+    history: Optional[list] = None
+
+
 class CandidatesBody(BaseModel):
     name: str
     company: Optional[str] = None
@@ -1161,6 +1168,79 @@ def get_person(name: str, company: Optional[str] = None, user=Depends(require_us
             else None,
         },
     }
+
+
+@app.post("/people/{name}/chat")
+def person_chat(name: str, body: PersonChatBody, user=Depends(require_user)):
+    """Ask questions about a researched person using dossier + conversation context only."""
+    from person_chat import ask_about_person
+    from people_lookup import public_dossier_from_record
+
+    company = body.company
+    you = (user.get("profile") or {}) if isinstance(user.get("profile"), dict) else {}
+
+    if body.draft_id:
+        from research_drafts import load_draft
+
+        draft = load_draft(body.draft_id)
+        if not draft:
+            raise HTTPException(404, "Draft not found")
+        summary = draft.get("summary") or {}
+        conversation = draft.get("conversation") or {}
+        contact = draft.get("contact") or {}
+        sources = draft.get("sources") or {}
+        result = ask_about_person(
+            question=body.question,
+            name=draft.get("name") or name,
+            company=draft.get("company") or company,
+            summary=_public_summary(summary) if summary else {},
+            conversation=conversation if isinstance(conversation, dict) else {},
+            contact=contact,
+            public_profile={},
+            sources={
+                "instagram_public": sources.get("instagram_public"),
+                "facebook_public": sources.get("facebook_public"),
+                "twitter_public": sources.get("twitter_public"),
+                "linkedin_public": sources.get("linkedin_public"),
+            },
+            you_profile=you,
+            history=body.history or [],
+        )
+    else:
+        record = profiles.load(name, company)
+        if not record:
+            raise HTTPException(404, "Person not found in your research cache")
+
+        sources = record.get("latest_sources") or {}
+        engine = record.get("latest_common_ground")
+        summary = record.get("latest_summary") or {}
+        conversation = public_conversation(engine) if engine else public_conversation(
+            summary.get("conversation") or summary.get("common_ground")
+        )
+        dossier = public_dossier_from_record(record)
+        result = ask_about_person(
+            question=body.question,
+            name=record.get("name") or name,
+            company=record.get("company") or company,
+            summary=_public_summary(summary) if summary else {},
+            conversation=conversation if isinstance(conversation, dict) else {},
+            contact=dossier.get("contact") or {},
+            public_profile=dossier,
+            sources={
+                "instagram_public": sources.get("instagram_public"),
+                "facebook_public": sources.get("facebook_public"),
+                "twitter_public": sources.get("twitter_public"),
+                "linkedin_public": sources.get("linkedin_public"),
+            },
+            you_profile=you,
+            history=body.history or [],
+        )
+
+    if result.get("status") == "skipped":
+        raise HTTPException(503, result.get("error") or "Chat unavailable")
+    if result.get("status") != "ok":
+        raise HTTPException(400, result.get("error") or "Chat failed")
+    return result
 
 
 @app.post("/people/{name}/interactions")

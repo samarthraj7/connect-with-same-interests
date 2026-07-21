@@ -32,6 +32,8 @@ Purpose of each **source** file in the repo (excludes `node_modules/`, local `us
 | `merge.py` | Combines connector results into one `sources` + `query` document for synthesis |
 | `synthesize.py` | Gemini briefing: identity lock, citations, structured JSON summary |
 | `common_ground.py` | Detailed-tier conversation engine (talk topics / openers from YOU vs THEM) |
+| `face_match.py` | Gemini vision: LinkedIn headshot vs Instagram (etc.) profile photos |
+| `person_chat.py` | Grounded Q&A over dossier + conversation ideas |
 | `identity_lock.py` | Normalize LinkedIn URLs, same-person checks, identity lock prompt text |
 | `name_match.py` | Exact vs probable Find Me name matching |
 | `research_drafts.py` | Save/load/delete ephemeral drafts under `profiles/_drafts/` until rated |
@@ -73,7 +75,7 @@ Purpose of each **source** file in the repo (excludes `node_modules/`, local `us
 | `github.py` | GitHub user/repo search |
 | `patents.py` | PatentsView inventor search |
 | `linkedin_public.py` | Logged-out single LinkedIn public profile fetch (optional flag) |
-| `instagram.py` / `facebook.py` / `twitter.py` | Opt-in social scrapers (`fetch_social`) |
+| `instagram.py` / `facebook.py` / `twitter.py` | Opt-in social scrapers; Instagram uses multi-candidate Google + face match vs LinkedIn photo |
 | `social_find.py` | Discover likely social handles |
 | `social_verify.py` | Score whether a social profile matches the person |
 | `opengraph.py` | Fetch OG image / meta for photo enrichment |
