@@ -36,6 +36,8 @@ export default function Home() {
   const [linkedin, setLinkedin] = useState("");
   const [tier, setTier] = useState<"basic" | "detailed">("detailed");
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [matchMode, setMatchMode] = useState<"exact" | "probable_only" | "none" | "">("");
+  const [matchMessage, setMatchMessage] = useState("");
   const [loadingCandidates, setLoadingCandidates] = useState(false);
   const [researching, setResearching] = useState(false);
   const [error, setError] = useState("");
@@ -48,6 +50,8 @@ export default function Home() {
   const findPeople = async () => {
     setError("");
     setCandidates([]);
+    setMatchMode("");
+    setMatchMessage("");
     setMustPick(false);
     if (!name.trim()) {
       setError("Enter a full name to search.");
@@ -56,15 +60,33 @@ export default function Home() {
     setLoadingCandidates(true);
     try {
       const res = await api.candidates(name.trim());
-      const list = res.candidates || [];
+      const mode = res.match_mode || (res.exact?.length ? "exact" : res.probable?.length ? "probable_only" : "none");
+      const list =
+        mode === "exact"
+          ? res.exact || res.candidates || []
+          : mode === "probable_only"
+            ? res.probable || res.candidates || []
+            : res.candidates || [];
+      setMatchMode(mode);
+      setMatchMessage(res.message || "");
       setCandidates(list);
-      if (list.length > 1) {
+      if (mode === "probable_only" && list.length) {
         setMustPick(true);
-        setStatus("Multiple people match — pick Full name · Company · Role.");
+        setStatus(
+          res.message ||
+            "Exact match not found. These are the probable people that you might be looking for.",
+        );
+      } else if (list.length > 1) {
+        setMustPick(true);
+        setStatus("Exact matches — pick Full name · Company · Role.");
       } else if (list.length === 1) {
-        setStatus("One candidate found — tap to confirm, or research with the fields below.");
+        setStatus(
+          mode === "exact"
+            ? "Exact match found — tap to confirm, or research with the fields below."
+            : "One candidate found — tap to confirm, or research with the fields below.",
+        );
       } else {
-        setStatus("No disambiguation hits — add company or LinkedIn, then research.");
+        setStatus(res.message || "No disambiguation hits — add company or LinkedIn, then research.");
       }
     } catch (e: any) {
       setError(e.message || "Candidate search failed");
@@ -107,7 +129,7 @@ export default function Home() {
         linkedin_url: li,
         place: override?.location || null,
         tier,
-        fetch_social: false,
+        fetch_social: true,
       });
       await refresh();
       if (res.status !== "ok") throw new Error(res.error || "Research failed");
@@ -234,6 +256,11 @@ export default function Home() {
           />
 
           {status ? <Text style={{ marginTop: 12, fontFamily: fonts.body, color: colors.leaf }}>{status}</Text> : null}
+          {matchMode === "probable_only" && matchMessage ? (
+            <Text style={{ marginTop: 8, fontFamily: fonts.bodyMed, color: colors.ember, lineHeight: 20 }}>
+              {matchMessage}
+            </Text>
+          ) : null}
           {error ? <Text style={{ marginTop: 12, fontFamily: fonts.bodyMed, color: colors.danger }}>{error}</Text> : null}
           {researching ? <ActivityIndicator color={colors.forest} style={{ marginTop: 12 }} /> : null}
 

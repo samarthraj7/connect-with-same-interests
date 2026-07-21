@@ -120,7 +120,7 @@ flowchart TD
   A[Mobile Expo app] -->|JWT + REST| B[FastAPI api/main.py]
   B --> C[Find Me: gemini_search / Exa LinkedIn people]
   B --> D[Orchestrator]
-  D --> E[Connectors: Apollo, Gemini, Exa, personal_info, public_web, GitHub...]
+  D --> E[Connectors: Apollo, A-Leads email, Gemini, Exa, personal_info, public_web, GitHub...]
   E --> F[merge_profile]
   F --> G[synthesize.summarize_profile]
   G --> H{auto_commit?}

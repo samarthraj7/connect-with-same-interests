@@ -201,7 +201,9 @@ def find_candidates(name: str, *, enrich_photos: bool = True) -> dict:
     Primary path (no company / university / LinkedIn required):
       Exa LinkedIn people web search → linkedin.com/in/… profiles
     Fallback: Gemini Google Search when Exa finds nobody.
-    Photos: Enrich Layer (LinkedIn URL) → Apollo → GitHub/OG → monogram.
+    Split: exact name matches only; if none, probable people + message.
+    Enrich: Apollo + Enrich Layer for company/role/location/photo/LinkedIn
+    on the visible bucket only.
     """
     print(f"[find_candidates] START name={name!r} model={MODEL}", flush=True)
     warning = None
@@ -264,59 +266,111 @@ def find_candidates(name: str, *, enrich_photos: bool = True) -> dict:
                 candidates = [c for c in (parsed.get("candidates") or []) if isinstance(c, dict)]
                 discovery = "gemini_search"
 
+    from name_match import exact_match_message, partition_candidates
+
     if not candidates:
         print("[find_candidates] EMPTY — typed-name passthrough", flush=True)
-        candidates = [
-            {
-                "name": name.strip(),
-                "company": None,
-                "role": None,
-                "location": None,
-                "linkedin_url": None,
-                "photo_url": None,
-                "context": "No LinkedIn people matches found for this name. Add company, university, or LinkedIn, or continue as typed.",
-            }
-        ]
+        passthrough = {
+            "name": name.strip(),
+            "company": None,
+            "role": None,
+            "location": None,
+            "linkedin_url": None,
+            "photo_url": None,
+            "context": "No LinkedIn people matches found for this name. Add company, university, or LinkedIn, or continue as typed.",
+        }
         warning = "no_public_matches"
         discovery = "passthrough"
+        msg = exact_match_message("none")
+        print("[find_candidates] DONE status=ok match_mode=none (passthrough)", flush=True)
+        return {
+            "status": "ok",
+            "candidates": [passthrough],
+            "exact": [],
+            "probable": [],
+            "match_mode": "none",
+            "message": msg,
+            "discovery": discovery,
+            "warning": warning,
+        }
 
     print(f"[find_candidates] discovery={discovery} count={len(candidates)}", flush=True)
     for i, c in enumerate(candidates):
         print(
             f"  [{i}] name={c.get('name')!r} company={c.get('company')!r} "
-            f"role={c.get('role')!r} linkedin={c.get('linkedin_url')!r}",
+            f"role={c.get('role')!r} linkedin={c.get('linkedin_url')!r} "
+            f"score={c.get('_score')!r}",
             flush=True,
         )
 
-    skip_photos = os.environ.get("CANDIDATE_PHOTO_ENRICH", "").strip().lower() in ("0", "false", "no")
-    want_photos = enrich_photos and not skip_photos
-    if want_photos and candidates:
-        print("[find_candidates] photo enrich ON (Enrich Layer → Apollo → …)…", flush=True)
-        candidates = _enrich_candidate_photos(candidates)
+    # Partition before enrich so we only spend Apollo/EL on cards we will show.
+    parted = partition_candidates(name, candidates)
+    match_mode = parted["match_mode"]
+    if match_mode == "exact":
+        to_enrich = list(parted["exact"])
+    elif match_mode == "probable_only":
+        to_enrich = list(parted["probable"])
+    else:
+        # All hits failed the probable floor — still show them as probable, not empty.
+        to_enrich = [{k: v for k, v in c.items() if k != "_score"} for c in candidates if isinstance(c, dict)]
+        match_mode = "probable_only" if to_enrich else "none"
+
+    skip_enrich = os.environ.get("CANDIDATE_PHOTO_ENRICH", "").strip().lower() in ("0", "false", "no")
+    want_enrich = enrich_photos and not skip_enrich
+    if want_enrich and to_enrich:
+        print("[find_candidates] Apollo + Enrich Layer enrich ON…", flush=True)
+        to_enrich = _enrich_candidate_photos(to_enrich)
         with_photo = sum(
             1
-            for c in candidates
+            for c in to_enrich
             if isinstance(c, dict)
             and (c.get("photo_url") or "").startswith("http")
             and "ui-avatars.com" not in (c.get("photo_url") or "")
         )
-        print(f"[find_candidates] real photos filled: {with_photo}/{len(candidates)}", flush=True)
+        print(f"[find_candidates] enriched; real photos: {with_photo}/{len(to_enrich)}", flush=True)
     else:
-        print("[find_candidates] photo enrich SKIPPED", flush=True)
+        print("[find_candidates] Apollo/Enrich Layer enrich SKIPPED", flush=True)
 
-    print(f"[find_candidates] DONE status=ok count={len(candidates)}", flush=True)
-    out = {"status": "ok", "candidates": candidates, "discovery": discovery}
+    # Strip any leftover scores
+    for c in to_enrich:
+        if isinstance(c, dict):
+            c.pop("_score", None)
+
+    exact = to_enrich if match_mode == "exact" else []
+    probable = to_enrich if match_mode == "probable_only" else []
+    # Keep the other bucket empty in the response when we only enriched the visible set
+    if match_mode == "exact":
+        # Still return unenriched probable for debugging? User asked: show ONLY exact when exact exists.
+        probable = []
+    display = exact if match_mode == "exact" else probable
+    msg = exact_match_message(match_mode)
+
+    print(
+        f"[find_candidates] DONE status=ok match_mode={match_mode} "
+        f"exact={len(exact)} probable={len(probable)}",
+        flush=True,
+    )
+    out = {
+        "status": "ok",
+        "candidates": display,
+        "exact": exact,
+        "probable": probable,
+        "match_mode": match_mode,
+        "discovery": discovery,
+    }
+    if msg:
+        out["message"] = msg
     if warning:
         out["warning"] = warning
     return out
 
 
 def _enrich_candidate_photos(candidates: list) -> list:
-    """Fill photo_url — Enrich Layer (LinkedIn) → Apollo → GitHub → OG → hunt → monogram."""
+    """Apollo + Enrich Layer for Find Me cards — company/role/LI/photo, then fallbacks."""
     if not candidates:
         return candidates
 
-    APOLLO_TIMEOUT = 8.0
+    APOLLO_TIMEOUT = 10.0
     EL_TIMEOUT = 12.0
     work = list(candidates[:6])
     rest = list(candidates[6:])
@@ -325,18 +379,62 @@ def _enrich_candidate_photos(candidates: list) -> list:
         if not isinstance(c, dict):
             return c
         out = dict(c)
-        existing = (out.get("photo_url") or "").strip()
-        if existing.startswith("http") and _looks_like_image_url(existing) and "ui-avatars.com" not in existing:
-            print(f"  [photo] keep gemini photo for {out.get('name')!r}", flush=True)
-            return out
         name = (out.get("name") or "").strip()
         company = (out.get("company") or "").strip() or None
         linkedin = (out.get("linkedin_url") or "").strip() or None
         role = (out.get("role") or "").strip() or None
         location = (out.get("location") or "").strip() or None
-        print(f"  [photo] enrich {name!r} company={company!r} li={bool(linkedin)}", flush=True)
+        print(f"  [enrich] Apollo+EL {name!r} company={company!r} li={bool(linkedin)}", flush=True)
 
-        # 1) Enrich Layer — LinkedIn photo (needs URL, or name+company to resolve)
+        # 0) Apollo first — fill company / role / LinkedIn / photo when possible
+        if name:
+            try:
+                from connectors import apollo
+
+                hit = apollo.enrich_person(
+                    name=name,
+                    company=company,
+                    linkedin_url=linkedin or out.get("linkedin_url"),
+                    timeout=APOLLO_TIMEOUT,
+                )
+                print(
+                    f"  [enrich] apollo status={hit.get('status')} "
+                    f"li={bool(hit.get('linkedin_url'))} photo={bool(hit.get('photo_url'))}",
+                    flush=True,
+                )
+                if hit.get("status") == "ok":
+                    if hit.get("linkedin_url") and not out.get("linkedin_url"):
+                        out["linkedin_url"] = hit["linkedin_url"]
+                        linkedin = hit["linkedin_url"]
+                    if hit.get("title") and not out.get("role"):
+                        out["role"] = hit["title"]
+                        role = hit["title"]
+                    org = (hit.get("organization") or {}).get("name") or hit.get("organization_name")
+                    if org and not out.get("company"):
+                        out["company"] = org
+                        company = org
+                    loc_bits = [hit.get("city"), hit.get("state")]
+                    loc = ", ".join(x for x in loc_bits if x)
+                    if loc and not out.get("location"):
+                        out["location"] = loc
+                        location = loc
+                    if hit.get("photo_url") and not (
+                        (out.get("photo_url") or "").startswith("http")
+                        and "ui-avatars.com" not in (out.get("photo_url") or "")
+                    ):
+                        out["photo_url"] = hit["photo_url"]
+                        out["photo_source"] = "apollo"
+            except Exception as exc:
+                print(f"  [enrich] apollo exception: {exc}", flush=True)
+
+        existing = (out.get("photo_url") or "").strip()
+        if existing.startswith("http") and _looks_like_image_url(existing) and "ui-avatars.com" not in existing:
+            # Still try Enrich Layer for missing LinkedIn fields
+            pass
+        else:
+            existing = ""
+
+        # 1) Enrich Layer — LinkedIn photo + profile fields
         try:
             from connectors import enrichlayer
 
@@ -350,22 +448,26 @@ def _enrich_candidate_photos(candidates: list) -> list:
                     timeout=EL_TIMEOUT,
                 )
                 print(
-                    f"  [photo] enrichlayer status={el.get('status')} photo={bool(el.get('photo_url'))}",
+                    f"  [enrich] enrichlayer status={el.get('status')} photo={bool(el.get('photo_url'))}",
                     flush=True,
                 )
                 if el.get("linkedin_url") and not out.get("linkedin_url"):
                     out["linkedin_url"] = el["linkedin_url"]
                     linkedin = el["linkedin_url"]
+                if el.get("title") and not out.get("role"):
+                    out["role"] = el["title"]
+                if (el.get("organization") or {}).get("name") and not out.get("company"):
+                    out["company"] = el["organization"]["name"]
                 if el.get("status") == "ok" and el.get("photo_url"):
                     out["photo_url"] = el["photo_url"]
                     out["photo_source"] = "enrichlayer"
-                    if el.get("title") and not out.get("role"):
-                        out["role"] = el["title"]
-                    if (el.get("organization") or {}).get("name") and not out.get("company"):
-                        out["company"] = el["organization"]["name"]
                     return out
         except Exception as exc:
-            print(f"  [photo] enrichlayer exception: {exc}", flush=True)
+            print(f"  [enrich] enrichlayer exception: {exc}", flush=True)
+
+        if existing:
+            print(f"  [enrich] keep existing photo for {out.get('name')!r}", flush=True)
+            return out
 
         # 2) GitHub handle in context → stable avatar
         gh = _github_handle_from_candidate(out)
@@ -376,58 +478,6 @@ def _enrich_candidate_photos(candidates: list) -> list:
                 out["photo_url"] = avatar
                 out["photo_source"] = "github"
                 return out
-
-        # 3) Apollo — may fill LI + photo when company known
-        if name:
-            try:
-                from connectors import apollo
-
-                hit = apollo.enrich_person(
-                    name=name,
-                    company=company,
-                    linkedin_url=linkedin or out.get("linkedin_url"),
-                    timeout=APOLLO_TIMEOUT,
-                )
-                print(
-                    f"  [photo] apollo status={hit.get('status')} photo={bool(hit.get('photo_url'))}",
-                    flush=True,
-                )
-                if hit.get("status") == "ok":
-                    if hit.get("photo_url"):
-                        out["photo_url"] = hit["photo_url"]
-                        out["photo_source"] = "apollo"
-                    if not out.get("linkedin_url") and hit.get("linkedin_url"):
-                        out["linkedin_url"] = hit["linkedin_url"]
-                        linkedin = hit["linkedin_url"]
-                    if not out.get("company") and (hit.get("organization") or {}).get("name"):
-                        out["company"] = hit["organization"]["name"]
-                    if not out.get("role") and hit.get("title"):
-                        out["role"] = hit["title"]
-                    if out.get("photo_url"):
-                        return out
-                    # Newly discovered LinkedIn → Enrich Layer photo (often better than OG)
-                    if linkedin:
-                        try:
-                            from connectors import enrichlayer
-
-                            if enrichlayer.configured():
-                                el2 = enrichlayer.profile_picture(linkedin, timeout=EL_TIMEOUT)
-                                if el2.get("status") == "ok" and el2.get("photo_url"):
-                                    out["photo_url"] = el2["photo_url"]
-                                    out["photo_source"] = "enrichlayer"
-                                    return out
-                        except Exception as exc:
-                            print(f"  [photo] enrichlayer after apollo: {exc}", flush=True)
-                    ghu = (hit.get("github_url") or "").strip()
-                    m = re.search(r"github\.com/([^/\s?#]+)", ghu or "")
-                    if m:
-                        avatar = f"https://github.com/{m.group(1)}.png"
-                        if _url_reachable(avatar):
-                            out["photo_url"] = avatar
-                            out["photo_source"] = "github"
-                            return out
-            except Exception as exc:
-                print(f"  [photo] apollo exception: {exc}", flush=True)
 
         for url in (out.get("linkedin_url"), linkedin):
             if not url:

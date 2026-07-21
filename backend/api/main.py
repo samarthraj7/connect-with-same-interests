@@ -125,7 +125,7 @@ class ResearchBody(BaseModel):
     place: Optional[str] = None
     linkedin_url: Optional[str] = None
     tier: Literal["basic", "detailed"] = "detailed"
-    fetch_social: bool = False
+    fetch_social: bool = True
     force_refresh: bool = False
     # When false (default), result is a draft until POST /research/feedback rates it good.
     auto_commit: bool = False
@@ -135,6 +135,13 @@ class InteractionBody(BaseModel):
     type: str = "note"
     note: str = ""
     meta: dict[str, Any] = {}
+
+
+class PersonChatBody(BaseModel):
+    question: str
+    company: Optional[str] = None
+    draft_id: Optional[str] = None
+    history: Optional[list] = None
 
 
 class CandidatesBody(BaseModel):
@@ -397,7 +404,7 @@ def research_me(body: SelfResearchBody, user=Depends(require_user)):
         university=university,
         place=place,
         linkedin_url=linkedin_url,
-        fetch_social=False,
+        fetch_social=True,
         force_refresh=body.force_refresh,
         persist=body.auto_commit,
         user_id=user["id"],
@@ -899,47 +906,81 @@ def _candidates_impl(body: CandidatesBody):
         print(f"[/public/candidates] not_found / empty — returning []", flush=True)
         return {"candidates": [], "status": status or "not_found", "error": err}
 
-    cands = list(result.get("candidates") or [])
-    before = len(cands)
-    company = (body.company or "").strip().lower()
-    university = (body.university or "").strip().lower()
-    linkedin = (body.linkedin_url or "").strip().lower()
-    if company:
-        filtered = [
-            c
-            for c in cands
-            if company in (c.get("company") or "").lower()
-            or company in (c.get("context") or "").lower()
-        ]
-        print(f"[/public/candidates] company filter {company!r}: {before} → {len(filtered) or before}", flush=True)
-        cands = filtered or cands
-    if university:
-        filtered = [
-            c
-            for c in cands
-            if university in (c.get("context") or "").lower()
-            or university in (c.get("location") or "").lower()
-            or university in (c.get("company") or "").lower()
-        ]
-        print(f"[/public/candidates] university filter {university!r}: {len(cands)} → {len(filtered) or len(cands)}", flush=True)
-        if filtered:
-            cands = filtered
-    if linkedin:
-        filtered = [
-            c
-            for c in cands
-            if linkedin in (c.get("linkedin_url") or "").lower()
-            or linkedin.replace("https://", "") in (c.get("linkedin_url") or "").lower()
-        ]
-        print(f"[/public/candidates] linkedin filter: {len(cands)} → {len(filtered) or len(cands)}", flush=True)
-        if filtered:
-            cands = filtered
+    def _apply_filters(rows: list) -> list:
+        out_rows = list(rows or [])
+        company = (body.company or "").strip().lower()
+        university = (body.university or "").strip().lower()
+        linkedin = (body.linkedin_url or "").strip().lower()
+        if company:
+            filtered = [
+                c
+                for c in out_rows
+                if company in (c.get("company") or "").lower()
+                or company in (c.get("context") or "").lower()
+            ]
+            out_rows = filtered or out_rows
+        if university:
+            filtered = [
+                c
+                for c in out_rows
+                if university in (c.get("context") or "").lower()
+                or university in (c.get("location") or "").lower()
+                or university in (c.get("company") or "").lower()
+            ]
+            if filtered:
+                out_rows = filtered
+        if linkedin:
+            filtered = [
+                c
+                for c in out_rows
+                if linkedin in (c.get("linkedin_url") or "").lower()
+                or linkedin.replace("https://", "") in (c.get("linkedin_url") or "").lower()
+            ]
+            if filtered:
+                out_rows = filtered
+        return out_rows
 
-    print(f"[/public/candidates] RESPONSE ok count={len(cands)}", flush=True)
+    exact = _apply_filters(list(result.get("exact") or []))
+    probable = _apply_filters(list(result.get("probable") or []))
+    match_mode = result.get("match_mode") or ("exact" if exact else "probable_only" if probable else "none")
+
+    # Filters may empty the preferred bucket — fall back to the other.
+    if match_mode == "exact" and not exact and probable:
+        match_mode = "probable_only"
+    if match_mode == "probable_only" and not probable and exact:
+        match_mode = "exact"
+
+    if match_mode == "exact":
+        cands = exact
+        probable = []  # UI shows exact only
+    elif match_mode == "probable_only":
+        cands = probable
+        exact = []
+    else:
+        # Passthrough / empty — keep find_candidates display list
+        cands = _apply_filters(list(result.get("candidates") or []))
+
+    from name_match import exact_match_message
+
+    message = result.get("message") or exact_match_message(match_mode)
+
+    print(
+        f"[/public/candidates] RESPONSE ok match_mode={match_mode} "
+        f"exact={len(exact)} probable={len(probable)} display={len(cands)}",
+        flush=True,
+    )
     for i, c in enumerate(cands):
         print(f"  → [{i}] {c.get('name')} @ {c.get('company')} | {c.get('role')}", flush=True)
     print("=" * 60, flush=True)
-    out = {"candidates": cands, "status": "ok"}
+    out = {
+        "candidates": cands,
+        "exact": exact,
+        "probable": probable,
+        "match_mode": match_mode,
+        "status": "ok",
+    }
+    if message:
+        out["message"] = message
     if result.get("warning"):
         out["warning"] = result["warning"]
     if result.get("discovery"):
@@ -1129,6 +1170,79 @@ def get_person(name: str, company: Optional[str] = None, user=Depends(require_us
     }
 
 
+@app.post("/people/{name}/chat")
+def person_chat(name: str, body: PersonChatBody, user=Depends(require_user)):
+    """Ask questions about a researched person using dossier + conversation context only."""
+    from person_chat import ask_about_person
+    from people_lookup import public_dossier_from_record
+
+    company = body.company
+    you = (user.get("profile") or {}) if isinstance(user.get("profile"), dict) else {}
+
+    if body.draft_id:
+        from research_drafts import load_draft
+
+        draft = load_draft(body.draft_id)
+        if not draft:
+            raise HTTPException(404, "Draft not found")
+        summary = draft.get("summary") or {}
+        conversation = draft.get("conversation") or {}
+        contact = draft.get("contact") or {}
+        sources = draft.get("sources") or {}
+        result = ask_about_person(
+            question=body.question,
+            name=draft.get("name") or name,
+            company=draft.get("company") or company,
+            summary=_public_summary(summary) if summary else {},
+            conversation=conversation if isinstance(conversation, dict) else {},
+            contact=contact,
+            public_profile={},
+            sources={
+                "instagram_public": sources.get("instagram_public"),
+                "facebook_public": sources.get("facebook_public"),
+                "twitter_public": sources.get("twitter_public"),
+                "linkedin_public": sources.get("linkedin_public"),
+            },
+            you_profile=you,
+            history=body.history or [],
+        )
+    else:
+        record = profiles.load(name, company)
+        if not record:
+            raise HTTPException(404, "Person not found in your research cache")
+
+        sources = record.get("latest_sources") or {}
+        engine = record.get("latest_common_ground")
+        summary = record.get("latest_summary") or {}
+        conversation = public_conversation(engine) if engine else public_conversation(
+            summary.get("conversation") or summary.get("common_ground")
+        )
+        dossier = public_dossier_from_record(record)
+        result = ask_about_person(
+            question=body.question,
+            name=record.get("name") or name,
+            company=record.get("company") or company,
+            summary=_public_summary(summary) if summary else {},
+            conversation=conversation if isinstance(conversation, dict) else {},
+            contact=dossier.get("contact") or {},
+            public_profile=dossier,
+            sources={
+                "instagram_public": sources.get("instagram_public"),
+                "facebook_public": sources.get("facebook_public"),
+                "twitter_public": sources.get("twitter_public"),
+                "linkedin_public": sources.get("linkedin_public"),
+            },
+            you_profile=you,
+            history=body.history or [],
+        )
+
+    if result.get("status") == "skipped":
+        raise HTTPException(503, result.get("error") or "Chat unavailable")
+    if result.get("status") != "ok":
+        raise HTTPException(400, result.get("error") or "Chat failed")
+    return result
+
+
 @app.post("/people/{name}/interactions")
 def add_interaction(
     name: str,
@@ -1157,6 +1271,9 @@ def health():
         "ok": True,
         "service": "connect-deeply",
         "apollo_configured": bool((os.environ.get("APOLLO_API_KEY") or "").strip()),
+        "aleads_configured": bool(
+            (os.environ.get("ALEADS_API_KEY") or os.environ.get("A_LEADS_API_KEY") or "").strip()
+        ),
         "enrichlayer_configured": bool(
             (os.environ.get("ENRICHLAYER_API_KEY") or os.environ.get("ENRICH_LAYER_API_KEY") or "").strip()
         ),

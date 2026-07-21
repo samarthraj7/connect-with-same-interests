@@ -120,7 +120,7 @@ def _from_research_profile(data: dict[str, Any]) -> dict[str, Any]:
     except Exception:
         pass
     if not contact.get("linkedin_url"):
-        for key in ("exa_search", "gemini_search", "linkedin_public"):
+        for key in ("exa_search", "gemini_search", "linkedin_public", "apollo", "aleads"):
             src = sources.get(key) or {}
             url = src.get("linkedin_url") or (src.get("profile") or {}).get("url")
             if not url and key == "gemini_search":
@@ -128,6 +128,20 @@ def _from_research_profile(data: dict[str, Any]) -> dict[str, Any]:
             if url:
                 contact = {**contact, "linkedin_url": url}
                 break
+
+    # Licensed contact fill — A-Leads preferred for email/phone, Apollo as backup
+    apollo = sources.get("apollo") if isinstance(sources.get("apollo"), dict) else {}
+    aleads = sources.get("aleads") if isinstance(sources.get("aleads"), dict) else {}
+    if aleads.get("status") == "ok":
+        if aleads.get("email") and not contact.get("email"):
+            contact = {**contact, "email": aleads["email"]}
+        if aleads.get("phone") and not contact.get("phone"):
+            contact = {**contact, "phone": aleads["phone"]}
+    if apollo.get("status") == "ok":
+        if apollo.get("email") and not contact.get("email"):
+            contact = {**contact, "email": apollo["email"]}
+    if not contact.get("email") and data.get("email"):
+        contact = {**contact, "email": data["email"]}
 
     headline_bits = [
         gemini.get("current_role") or summary.get("current_role"),

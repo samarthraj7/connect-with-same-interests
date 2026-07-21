@@ -98,6 +98,8 @@ export function SignupSheet({ visible, onClose }: Props) {
   const [university, setUniversity] = useState("");
   const [linkedin, setLinkedin] = useState("");
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [matchMode, setMatchMode] = useState<"exact" | "probable_only" | "none" | "">("");
+  const [matchMessage, setMatchMessage] = useState("");
   const [picked, setPicked] = useState<Candidate | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -120,6 +122,8 @@ export function SignupSheet({ visible, onClose }: Props) {
       setProgress(0);
       setPhase("");
       setCandidates([]);
+      setMatchMode("");
+      setMatchMessage("");
       setPicked(null);
       setShowFilters(false);
       if (timer.current) clearInterval(timer.current);
@@ -158,9 +162,21 @@ export function SignupSheet({ visible, onClose }: Props) {
         throw new Error(`Bad response from ${url}: ${text.slice(0, 200)}`);
       }
       if (!res.ok) throw new Error(data?.detail || data?.error || `HTTP ${res.status}`);
-      const list = data.candidates || [];
+      const mode =
+        data.match_mode ||
+        (data.exact?.length ? "exact" : data.probable?.length ? "probable_only" : "none");
+      const list =
+        mode === "exact"
+          ? data.exact || data.candidates || []
+          : mode === "probable_only"
+            ? data.probable || data.candidates || []
+            : data.candidates || [];
+      setMatchMode(mode);
+      setMatchMessage(data.message || "");
       setCandidates(list);
-      if (data.warning === "no_public_matches" || (!list.length && !data.error)) {
+      if (mode === "probable_only" && list.length) {
+        setError("");
+      } else if (data.warning === "no_public_matches" || (!list.length && !data.error)) {
         setError("No public matches — tap the name card (or add company/LinkedIn) to continue.");
       } else if (!list.length) {
         setError(
@@ -170,6 +186,8 @@ export function SignupSheet({ visible, onClose }: Props) {
         );
       } else if (list.length === 1 && (list[0].context || "").toLowerCase().includes("no public")) {
         setError("No public matches found — select this card or add company/LinkedIn filters.");
+      } else {
+        setError("");
       }
       setStep(1);
     } catch (e: any) {
@@ -393,6 +411,16 @@ export function SignupSheet({ visible, onClose }: Props) {
                       <Field label="LinkedIn URL or id" autoCapitalize="none" value={linkedin} onChangeText={setLinkedin} />
                       <Button title="Re-filter matches" onPress={findCandidates} loading={loading} style={{ marginBottom: 10 }} />
                     </View>
+                  ) : null}
+
+                  {matchMode === "probable_only" && matchMessage ? (
+                    <Text style={{ fontFamily: fonts.bodyMed, color: colors.ember, marginBottom: 10, lineHeight: 20 }}>
+                      {matchMessage}
+                    </Text>
+                  ) : matchMode === "exact" && candidates.length ? (
+                    <Text style={{ fontFamily: fonts.body, color: colors.muted, marginBottom: 10 }}>
+                      Exact name matches — pick the one that is you.
+                    </Text>
                   ) : null}
 
                   {candidates.map((c, i) => (

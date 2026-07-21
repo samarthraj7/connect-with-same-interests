@@ -86,17 +86,37 @@ function SocialBlock({ label, data }: { label: string; data?: any }) {
   const handle = data.handle || profile.username || profile.full_name;
   const url = data.profile_url;
   const posts = data.recent_posts || [];
+  const face = data.face_match;
+  const rankings = (face?.rankings || []).slice(0, 4);
   return (
     <View style={styles.card}>
       <Text style={styles.cardTitle}>{label}</Text>
       <Text style={styles.cardMeta}>
         {status}
         {data.match_confidence ? ` · ${data.match_confidence} match` : ""}
+        {face?.match_mode ? ` · face ${face.match_mode}` : ""}
       </Text>
       {handle ? <Text style={styles.cardMeta}>@{String(handle).replace(/^@/, "")}</Text> : null}
       {url ? <UrlLink url={url} label={`Open ${label}`} /> : null}
       {(profile.biography || profile.bio) ? (
         <Text style={styles.cardBody}>{profile.biography || profile.bio}</Text>
+      ) : null}
+      {face?.accepted ? (
+        <Text style={styles.cardMeta}>
+          Face match: @{face.accepted.handle} ({face.accepted.score}/100)
+        </Text>
+      ) : null}
+      {status === "ambiguous" && rankings.length ? (
+        <>
+          <Text style={[styles.cardMeta, { marginTop: 8 }]}>Probable accounts (face ranked)</Text>
+          {rankings.map((r: any, i: number) => (
+            <Bullet key={i}>
+              @{r.handle}
+              {r.score != null ? ` · ${r.score}/100` : ""}
+              {r.reason ? ` — ${r.reason}` : ""}
+            </Bullet>
+          ))}
+        </>
       ) : null}
       {posts.slice(0, 4).map((p: any, i: number) => (
         <Bullet key={i}>{(p.caption || p.snippet || "").slice(0, 160)}</Bullet>
@@ -128,6 +148,12 @@ export default function PersonDetail() {
   const [showBadForm, setShowBadForm] = useState(false);
   const [pickedLinkedin, setPickedLinkedin] = useState<string>(
     linkedinParam ? String(linkedinParam) : "",
+  );
+  const [chatInput, setChatInput] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
+  const [chatError, setChatError] = useState("");
+  const [chatMessages, setChatMessages] = useState<{ role: "user" | "assistant"; content: string }[]>(
+    [],
   );
 
   useEffect(() => {
@@ -264,6 +290,30 @@ export default function PersonDetail() {
       setError(e.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const askChat = async () => {
+    const q = chatInput.trim();
+    if (!q || !name || chatBusy) return;
+    setChatError("");
+    setChatBusy(true);
+    const nextHistory = [...chatMessages, { role: "user" as const, content: q }];
+    setChatMessages(nextHistory);
+    setChatInput("");
+    try {
+      const res = await api.personChat(String(name), {
+        question: q,
+        company: company || null,
+        draft_id: pendingDraftId || null,
+        history: nextHistory.slice(0, -1),
+      });
+      setChatMessages([...nextHistory, { role: "assistant", content: res.answer }]);
+    } catch (e: any) {
+      setChatError(e.message || "Chat failed");
+      setChatMessages(nextHistory);
+    } finally {
+      setChatBusy(false);
     }
   };
 
@@ -426,6 +476,32 @@ export default function PersonDetail() {
               ))}
             </>
           ) : null}
+
+          <SectionTitle>Ask about them</SectionTitle>
+          <Body>
+            Chat about this dossier and conversation ideas. Answers stay grounded in what we researched.
+          </Body>
+          {chatMessages.map((m, i) => (
+            <View
+              key={`${m.role}-${i}`}
+              style={[
+                styles.card,
+                m.role === "user" ? { borderColor: colors.forest } : null,
+              ]}
+            >
+              <Text style={styles.cardMeta}>{m.role === "user" ? "You" : "Connect Deeply"}</Text>
+              <Text style={styles.cardBody}>{m.content}</Text>
+            </View>
+          ))}
+          {chatError ? <Text style={styles.err}>{chatError}</Text> : null}
+          <Field
+            label="Question"
+            value={chatInput}
+            onChangeText={setChatInput}
+            placeholder="What should I open with? Any shared cities?"
+            multiline
+          />
+          <Button title={chatBusy ? "Thinking…" : "Ask"} onPress={askChat} loading={chatBusy} style={{ marginBottom: 8 }} />
 
           {/* 3. Full dossier */}
           <SectionTitle>Career</SectionTitle>
