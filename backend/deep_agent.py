@@ -227,9 +227,12 @@ def _retrieve_urls(query: str, *, identity: dict) -> list[str]:
 
     canonical = normalize_linkedin_url(identity.get("linkedin_url"))
     if canonical:
+        from identity_filter import url_conflicts_with_canonical
+
         filtered = []
         for u in urls:
-            if "linkedin.com/in/" in u.lower() and not same_linkedin(canonical, u):
+            if url_conflicts_with_canonical(u, canonical):
+                print(f"  [deep_agent] drop URL (other LinkedIn identity): {u}", flush=True)
                 continue
             filtered.append(u)
         urls = filtered
@@ -254,6 +257,19 @@ def _grounding_urls(response) -> list[str]:
 
 def _fetch_pages(urls: list[str]) -> list[dict]:
     pages: list[dict] = []
+
+    # Prefer Nimble when configured — full page markdown beats OG tags / raw GET.
+    try:
+        from connectors import nimble
+
+        if nimble.configured():
+            result = nimble.extract_many(urls, max_pages=min(len(urls), MAX_URLS_PER_HOP))
+            blobs = nimble.pages_as_text_blobs(result, max_chars=MAX_PAGE_CHARS)
+            if blobs:
+                return blobs
+            print("  [deep_agent] Nimble returned no pages — falling back to OG/GET", flush=True)
+    except Exception as exc:
+        print(f"  [deep_agent] Nimble unavailable ({exc}) — falling back", flush=True)
 
     def one(url: str) -> Optional[dict]:
         try:
@@ -317,7 +333,22 @@ Pages:
         data = json.loads(resp.text or "{}")
         facts = data.get("facts") if isinstance(data, dict) else None
         if isinstance(facts, list):
-            return [f for f in facts if isinstance(f, dict)][:20]
+            from identity_filter import text_declares_other_linkedin, url_conflicts_with_canonical
+
+            canonical = identity.get("linkedin_url")
+            kept = []
+            for f in facts:
+                if not isinstance(f, dict):
+                    continue
+                src = f.get("source_url") or ""
+                fact = f.get("fact") or ""
+                if url_conflicts_with_canonical(src, canonical) or text_declares_other_linkedin(
+                    f"{src}\n{fact}", canonical
+                ):
+                    print(f"  [deep_agent] drop fact from other identity: {src}", flush=True)
+                    continue
+                kept.append(f)
+            return kept[:20]
     except (errors.ClientError, errors.ServerError, json.JSONDecodeError, TypeError) as exc:
         print(f"  [deep_agent] extract error: {exc}", flush=True)
     return []

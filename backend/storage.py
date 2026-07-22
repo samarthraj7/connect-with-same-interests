@@ -257,10 +257,21 @@ def _seed_contact_from_sources(contact: dict, sources: dict, *, preferred_linked
     if preferred_linkedin:
         contact["linkedin_url"] = preferred_linkedin
     github = sources.get("github") or {}
-    if not contact.get("github_username") and github.get("status") == "ok":
+    # Only auto-seed GitHub when identity_resolve confirmed the LinkedIn↔GitHub link
+    # (or the username was explicitly user-supplied and still confirmed / attached).
+    if not contact.get("github_username"):
+        im = github.get("identity_match") or {}
+        tier = (im.get("tier") or "").lower()
         username = github.get("username") or (github.get("profile") or {}).get("login")
-        if username:
+        if github.get("status") == "ok" and username and (
+            tier == "confirmed" or github.get("username_user_supplied")
+        ):
+            # user_supplied still requires confirmed when LinkedIn lock existed;
+            # status=ok already encodes that when linkedin was present.
             contact["github_username"] = username
+        elif github.get("status") == "ok" and username and not im:
+            # Legacy path without resolver output — do not auto-merge on name
+            pass
 
 
 def _merge_sources(old_sources: dict, new_sources: dict) -> dict:

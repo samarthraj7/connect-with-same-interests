@@ -1,10 +1,11 @@
 """Social profile URL discovery.
 
 Strategy:
-1. Up to 4 different Google searches for the platform profile URL
-2. Prefer the first real profile link (resolve Google grounding redirects)
-3. If Google still fails, ScrapeCreators name-only search (Instagram) —
-   query is JUST the person's name, never company/extra junk
+1. Google Search for platform profile URLs (name / name+company)
+2. Synthetic username guesses from the person's name
+3. Name-filter candidates (title/handle must match name tokens)
+4. ScrapeCreators is NOT used for name-search discovery — callers deep-fetch
+   only after name (+ photo) verification (see instagram.py).
 """
 
 from __future__ import annotations
@@ -54,7 +55,7 @@ def find_profile_link(
     company: Optional[str] = None,
     known_url: Optional[str] = None,
 ) -> dict:
-    """Find a profile URL/handle: Google attempts, then ScrapeCreators name-only."""
+    """Find a profile URL/handle: Google + username guesses (no SC name search)."""
     multi = find_profile_candidates(name, platform, company=company, known_url=known_url, max_candidates=1)
     cands = multi.get("candidates") or []
     if cands:
@@ -78,7 +79,7 @@ def find_profile_link(
         "attempts": multi.get("attempts") or [],
         "grounding_urls": multi.get("grounding_urls") or [],
         "reason": multi.get("reason")
-        or f"no {platform} profile URL after Google + ScrapeCreators",
+        or f"no {platform} profile URL after Google + username guesses",
         "candidates": [],
     }
 
@@ -89,8 +90,13 @@ def find_profile_candidates(
     company: Optional[str] = None,
     known_url: Optional[str] = None,
     max_candidates: int = 10,
+    search_constraints: Optional[dict] = None,
 ) -> dict:
-    """Collect up to N profile candidates from Google grounding + ScrapeCreators."""
+    """Collect profile candidates from Google + username guesses; name-filter them.
+
+    Does NOT call ScrapeCreators name search — deep fetch happens later for
+    verified handles only.
+    """
     platform = platform.lower().strip()
     if platform not in PLATFORM_HOSTS:
         return {"status": "error", "error": f"unsupported platform: {platform}", "candidates": []}
@@ -99,9 +105,11 @@ def find_profile_candidates(
     attempts: List[dict] = []
     seen: set = set()
     candidates: List[dict] = []
+    sc = search_constraints or {}
+    reject_handles = {h.lower().lstrip("@") for h in (sc.get("reject_handles") or []) if h}
 
     def _add(url: Optional[str], *, method: str, title: Optional[str] = None, handle: Optional[str] = None):
-        if len(candidates) >= max_candidates:
+        if len(candidates) >= max_candidates * 2:  # gather extra before name filter
             return
         resolved = _resolve_url(url) if url else None
         h = (handle or _handle_from_url(resolved or "", platform) or "").lstrip("@").strip()
@@ -110,7 +118,7 @@ def find_profile_candidates(
         if not h:
             return
         key = h.lower()
-        if key in seen:
+        if key in seen or key in reject_handles:
             return
         if resolved and not _is_profile_url(resolved, platform):
             resolved = _url_for_handle(h, platform)
@@ -132,7 +140,7 @@ def find_profile_candidates(
             _add(resolved, method="known_url")
 
     for i, query in enumerate(_google_queries(name, platform, company), start=1):
-        if len(candidates) >= max_candidates:
+        if len(candidates) >= max_candidates * 2:
             break
         print(f"  [social] Google candidates attempt {i}/{MAX_GOOGLE_ATTEMPTS}: {query!r}")
         hit = _google_collect_profiles(query, platform, name, limit=max_candidates)
@@ -149,38 +157,96 @@ def find_profile_candidates(
         for c in (hit or {}).get("candidates") or []:
             _add(c.get("url"), method=c.get("method") or "google", title=c.get("title"), handle=c.get("handle"))
 
-    if len(candidates) < max_candidates and platform == "instagram":
-        print(f"  [social] ScrapeCreators name search for more IG candidates: {name!r}")
-        sc_hit = _scrapecreators_name_search(name, platform)
-        if sc_hit and sc_hit.get("handle"):
-            _add(sc_hit.get("url"), method="scrapecreators_name_only", handle=sc_hit.get("handle"))
-            for extra in sc_hit.get("scrapecreators_candidates") or []:
-                _add(
-                    None,
-                    method="scrapecreators_search",
-                    handle=extra.get("username") or extra.get("handle"),
-                    title=extra.get("full_name"),
-                )
+    # Username guesses from name (no API) — later verified by name + face before SC deep-fetch
+    for guess in _username_guesses(name):
+        _add(None, method="username_guess", handle=guess, title=name)
 
-    if not candidates:
+    # Name-filter: keep candidates whose title/handle plausibly match the person
+    filtered = [c for c in candidates if _name_matches_candidate(name, c)]
+    if not filtered and candidates:
+        # Keep known_url + username_guess even if title missing
+        filtered = [
+            c for c in candidates
+            if (c.get("method") or "") in ("known_url", "username_guess")
+        ] or candidates[:max_candidates]
+
+    if not filtered:
         return {
             "status": "not_found",
             "candidates": [],
             "method": "exhausted",
             "attempts": attempts,
             "grounding_urls": [],
-            "reason": f"no {platform} candidates after Google + ScrapeCreators",
+            "reason": f"no {platform} candidates after Google + name filter (SC deferred)",
         }
 
-    print(f"  [social] {platform} candidates={len(candidates)}: {[c['handle'] for c in candidates]}", flush=True)
+    print(
+        f"  [social] {platform} candidates={len(filtered[:max_candidates])} "
+        f"(pre-SC name-filtered): {[c['handle'] for c in filtered[:max_candidates]]}",
+        flush=True,
+    )
     return {
         "status": "ok",
-        "candidates": candidates[:max_candidates],
+        "candidates": filtered[:max_candidates],
         "method": "multi_candidate",
         "attempts": attempts,
         "grounding_urls": (attempts[0].get("grounding_urls") if attempts else []) or [],
         "query": (attempts[0].get("query") if attempts else None),
     }
+
+
+def _username_guesses(name: str) -> List[str]:
+    parts = [p for p in re.split(r"[^A-Za-z0-9]+", (name or "").strip()) if p]
+    if not parts:
+        return []
+    guesses: List[str] = []
+    first = parts[0].lower()
+    last = parts[-1].lower() if len(parts) > 1 else ""
+    if last:
+        guesses.extend(
+            [
+                f"{first}{last}",
+                f"{first}.{last}",
+                f"{first}_{last}",
+                f"{first[0]}{last}" if first else last,
+                f"{first}{last[0]}" if last else first,
+            ]
+        )
+    else:
+        guesses.append(first)
+    # Dedupe, valid IG-ish handles
+    out = []
+    seen = set()
+    for g in guesses:
+        g = re.sub(r"[^a-z0-9._]", "", g.lower())[:30]
+        if len(g) < 3 or g in seen:
+            continue
+        seen.add(g)
+        out.append(g)
+    return out[:6]
+
+
+def _name_matches_candidate(name: str, candidate: dict) -> bool:
+    """True if title or handle shares meaningful name tokens with the person."""
+    tokens = [t.lower() for t in re.split(r"[^A-Za-z]+", name or "") if len(t) > 1]
+    if not tokens:
+        return True
+    title = (candidate.get("title") or "").lower()
+    handle = (candidate.get("handle") or "").lower().replace(".", "").replace("_", "")
+    method = candidate.get("method") or ""
+    if method == "known_url":
+        return True
+    if title:
+        if all(t in title for t in tokens[:2]):
+            return True
+        if tokens[0] in title and (len(tokens) < 2 or tokens[-1] in title):
+            return True
+    # Handle contains first+last initials/parts
+    if tokens[0][:3] in handle and (len(tokens) < 2 or tokens[-1][:3] in handle):
+        return True
+    if method == "username_guess":
+        return True  # already derived from name
+    return False
 
 
 def _google_collect_profiles(query: str, platform: str, name: str, *, limit: int = 10) -> Optional[dict]:

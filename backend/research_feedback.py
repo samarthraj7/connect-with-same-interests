@@ -169,6 +169,150 @@ def corrections_prompt_block(rows: List[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def search_constraints_from_feedback(rows: List[dict[str, Any]]) -> dict[str, Any]:
+    """Parse bad-feedback notes into query constraints for Gemini/Exa/social retries.
+
+    Returns keys used by connectors:
+      reject_slugs, reject_handles, reject_domains, exclude_phrases,
+      prefer_company, prefer_university, query_suffix, prompt_block
+    """
+    import re
+
+    reject_slugs: list[str] = []
+    reject_handles: list[str] = []
+    reject_domains: list[str] = []
+    exclude_phrases: list[str] = []
+    prefer_company: Optional[str] = None
+    prefer_university: Optional[str] = None
+    extra_bits: list[str] = []
+
+    for r in rows or []:
+        notes = (r.get("wrong_notes") or "").strip()
+        cats = [c.lower() for c in (r.get("wrong_categories") or [])]
+        blob = f"{notes} {' '.join(cats)}".lower()
+
+        # LinkedIn /in/slug or bare slug mentions
+        for m in re.finditer(
+            r"(?:linkedin\.com/in/|wrong\s+(?:person|profile|linkedin)\s+[:\-]?\s*)([a-z0-9\-_%]{2,80})",
+            notes,
+            re.I,
+        ):
+            slug = m.group(1).strip("/").lower()
+            if slug and slug not in reject_slugs and "http" not in slug:
+                reject_slugs.append(slug)
+
+        for m in re.finditer(r"@([A-Za-z0-9._]{2,40})", notes):
+            h = m.group(1).lower()
+            if h not in reject_handles:
+                reject_handles.append(h)
+
+        # "not at X" / "wrong company X" / "works at Y instead"
+        m = re.search(
+            r"(?:not\s+(?:at|with)|wrong\s+company|isn't\s+at|isn't\s+with)\s+([A-Za-z0-9][\w .&'-]{1,40})",
+            notes,
+            re.I,
+        )
+        if m:
+            phrase = m.group(1).strip(" .,;")
+            if phrase and phrase.lower() not in {p.lower() for p in exclude_phrases}:
+                exclude_phrases.append(phrase)
+
+        m = re.search(
+            r"(?:actually\s+(?:at|with)|correct\s+company|works?\s+at|is\s+at)\s+([A-Za-z0-9][\w .&'-]{1,40})",
+            notes,
+            re.I,
+        )
+        if m and not prefer_company:
+            prefer_company = m.group(1).strip(" .,;")
+
+        m = re.search(
+            r"(?:wrong\s+(?:school|university|college)|not\s+(?:from|at))\s+([A-Za-z0-9][\w .&'-]{1,50})",
+            notes,
+            re.I,
+        )
+        if m:
+            phrase = m.group(1).strip(" .,;")
+            if phrase and phrase.lower() not in {p.lower() for p in exclude_phrases}:
+                exclude_phrases.append(phrase)
+
+        m = re.search(
+            r"(?:actually\s+(?:at|from)|correct\s+(?:school|university)|went\s+to)\s+([A-Za-z0-9][\w .&'-]{1,50})",
+            notes,
+            re.I,
+        )
+        if m and not prefer_university:
+            prefer_university = m.group(1).strip(" .,;")
+
+        if "wrong person" in blob or "wrong profile" in blob or "different person" in blob:
+            extra_bits.append("exclude other same-name people")
+        if "outdated" in blob or "old role" in blob:
+            extra_bits.append("prefer recent role/employer evidence")
+        if "peerlist" in blob:
+            reject_domains.append("peerlist.com")
+        if notes and len(notes) > 8:
+            # Keep a short freeform exclusion cue for prompts
+            clip = notes[:120].replace("\n", " ")
+            if clip.lower() not in {p.lower() for p in exclude_phrases}:
+                exclude_phrases.append(clip)
+
+    # Dedupe domains
+    reject_domains = list(dict.fromkeys(reject_domains))
+
+    query_parts = []
+    if prefer_company:
+        query_parts.append(prefer_company)
+    if prefer_university:
+        query_parts.append(prefer_university)
+    for slug in reject_slugs[:3]:
+        query_parts.append(f'-"{slug}"')
+    for phrase in exclude_phrases[:2]:
+        # Exa/Google: negative phrasing
+        if len(phrase) < 40:
+            query_parts.append(f'-"{phrase}"')
+
+    prompt_lines = []
+    if reject_slugs or reject_handles or exclude_phrases or prefer_company or prefer_university:
+        prompt_lines.append("SEARCH CONSTRAINTS from prior user corrections (apply to every query):")
+        if prefer_company:
+            prompt_lines.append(f"- Prefer employer/company: {prefer_company}")
+        if prefer_university:
+            prompt_lines.append(f"- Prefer school/university: {prefer_university}")
+        if reject_slugs:
+            prompt_lines.append(f"- NEVER use LinkedIn slugs: {', '.join(reject_slugs)}")
+        if reject_handles:
+            prompt_lines.append(f"- NEVER use social handles: {', '.join('@'+h for h in reject_handles)}")
+        if reject_domains:
+            prompt_lines.append(f"- Deprioritize/ignore domains: {', '.join(reject_domains)}")
+        if exclude_phrases:
+            prompt_lines.append(f"- Exclude / do not chase: {'; '.join(exclude_phrases[:5])}")
+        for b in extra_bits:
+            prompt_lines.append(f"- {b}")
+
+    return {
+        "reject_slugs": reject_slugs,
+        "reject_handles": reject_handles,
+        "reject_domains": reject_domains,
+        "exclude_phrases": exclude_phrases,
+        "prefer_company": prefer_company,
+        "prefer_university": prefer_university,
+        "query_suffix": " ".join(query_parts).strip() or None,
+        "prompt_block": "\n".join(prompt_lines) if prompt_lines else "",
+    }
+
+
+def merged_search_constraints(
+    *,
+    name: str,
+    company: Optional[str] = None,
+    linkedin_url: Optional[str] = None,
+) -> dict[str, Any]:
+    """Load prior bad feedback and build connector search constraints."""
+    rows = prior_bad_corrections(name=name, company=company, linkedin_url=linkedin_url)
+    if not rows:
+        return {}
+    return search_constraints_from_feedback(rows)
+
+
 def _dual_write_supabase(row: dict[str, Any]) -> None:
     try:
         from db import get_supabase

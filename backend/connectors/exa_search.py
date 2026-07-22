@@ -12,11 +12,18 @@ EXA_API = "https://api.exa.ai/search"
 TIMEOUT = 15
 
 
-def find_linkedin_people_by_name(name: str, *, max_people: int = 8) -> dict:
-    """Name-only LinkedIn people discovery via Exa (linkedin.com/in/… results).
+def find_linkedin_people_by_name(
+    name: str,
+    *,
+    company: Optional[str] = None,
+    university: Optional[str] = None,
+    max_people: int = 8,
+) -> dict:
+    """LinkedIn people discovery via Exa (linkedin.com/in/… results).
 
-    No company / university / LinkedIn URL required — this is the Find Me
-    primary path: web search restricted to LinkedIn profile pages.
+    When company/university are provided, those queries run first so Google-like
+    disambiguation ("Name" "University of Southern California") actually affects
+    who shows up — not only a post-hoc soft filter on a name-only shortlist.
     """
     api_key = os.environ.get("EXA_API_KEY")
     if not api_key:
@@ -26,20 +33,65 @@ def find_linkedin_people_by_name(name: str, *, max_people: int = 8) -> dict:
     if not name:
         return {"status": "error", "error": "name required", "candidates": []}
 
-    headers = {"x-api-key": api_key, "Content-Type": "application/json"}
-    queries = [
-        f'"{name}" site:linkedin.com/in',
-        f'"{name}" LinkedIn',
-        f"{name} site:linkedin.com/in",
-        f"{name} LinkedIn profile",
-    ]
+    company = (company or "").strip() or None
+    university = (university or "").strip() or None
 
-    print(f"[exa linkedin-people] START name={name!r}", flush=True)
+    headers = {"x-api-key": api_key, "Content-Type": "application/json"}
+    queries: List[str] = []
+    if university:
+        queries.extend(
+            [
+                f'"{name}" "{university}" site:linkedin.com/in',
+                f'"{name}" {university} LinkedIn',
+                f'"{name}" "{university}" alumni OR student OR MSCS OR graduate',
+            ]
+        )
+        # Common short forms help when people write "USC" not the full name
+        for alias in _org_aliases(university):
+            if alias.lower() == university.lower():
+                continue
+            queries.append(f'"{name}" "{alias}" site:linkedin.com/in')
+    if company and (not university or company.lower() != university.lower()):
+        queries.extend(
+            [
+                f'"{name}" "{company}" site:linkedin.com/in',
+                f'"{name}" {company} LinkedIn',
+            ]
+        )
+        for alias in _org_aliases(company):
+            if alias.lower() == company.lower():
+                continue
+            queries.append(f'"{name}" "{alias}" site:linkedin.com/in')
+    # Always finish with name-only so we still have a fallback shortlist
+    queries.extend(
+        [
+            f'"{name}" site:linkedin.com/in',
+            f'"{name}" LinkedIn',
+            f"{name} site:linkedin.com/in",
+            f"{name} LinkedIn profile",
+        ]
+    )
+    # De-dupe queries while preserving order
+    seen_q: set = set()
+    ordered_queries = []
+    for q in queries:
+        key = q.lower()
+        if key in seen_q:
+            continue
+        seen_q.add(key)
+        ordered_queries.append(q)
+
+    print(
+        f"[exa linkedin-people] START name={name!r} company={company!r} university={university!r}",
+        flush=True,
+    )
     seen: set = set()
     raw_hits: list = []
+    # Prefer more hits when filters are present — common names need room for the right one
+    target = max_people * 3 if (company or university) else max_people * 2
 
-    for q in queries:
-        if len(raw_hits) >= max_people * 2:
+    for q in ordered_queries:
+        if len(raw_hits) >= target:
             break
         print(f"  [exa linkedin-people] query={q!r}", flush=True)
         results = _run_search(
@@ -53,7 +105,6 @@ def find_linkedin_people_by_name(name: str, *, max_people: int = 8) -> dict:
             url = _canonical_profile_url(r.get("url"))
             if not url or url in seen:
                 continue
-            # Skip company/school/pulse pages that still match include_domains
             if "/in/" not in url:
                 continue
             seen.add(url)
@@ -64,22 +115,150 @@ def find_linkedin_people_by_name(name: str, *, max_people: int = 8) -> dict:
     for h in raw_hits:
         cand = _hit_to_candidate(h, fallback_name=name)
         score = _name_overlap_score(name, cand.get("name") or "", h)
-        cand["_score"] = score
+        score += _org_context_boost(h, cand, company=company, university=university)
+        # Prefer hits that came from a filtered query
+        qtext = (h.get("query") or "").lower()
+        if university and any(a.lower() in qtext for a in _org_aliases(university)):
+            score += 0.2
+        if company and any(a.lower() in qtext for a in _org_aliases(company)):
+            score += 0.15
+        cand["_score"] = min(score, 1.5)
         scored.append(cand)
-        print(f"    score={score:.2f} name={cand.get('name')!r} li={cand.get('linkedin_url')}", flush=True)
+        print(
+            f"    score={cand['_score']:.2f} name={cand.get('name')!r} "
+            f"co={cand.get('company')!r} li={cand.get('linkedin_url')}",
+            flush=True,
+        )
 
-    # Keep scores for exact/probable partition upstream; drop very weak noise.
     ranked = sorted(scored, key=lambda x: -x["_score"])
-    picked = [c for c in ranked if c["_score"] >= 0.25][: max(max_people * 2, max_people)]
+    keep_n = max(max_people * 2, max_people)
+    if company or university:
+        keep_n = max(keep_n, 16)
+    picked = [c for c in ranked if c["_score"] >= 0.25][:keep_n]
     if not picked and ranked:
         picked = ranked[:max_people]
+
+    # If filters were set, surface org-matching people first even if name score was similar
+    if company or university:
+        matched = [c for c in picked if _candidate_matches_org(c, company=company, university=university)]
+        others = [c for c in picked if c not in matched]
+        if matched:
+            picked = matched + others
 
     print(f"[exa linkedin-people] DONE count={len(picked)} (from {len(raw_hits)} hits)", flush=True)
     return {
         "status": "ok" if picked else "not_found",
         "candidates": picked,
         "source": "exa_linkedin_people",
+        "filter_matched": sum(
+            1 for c in picked if _candidate_matches_org(c, company=company, university=university)
+        ),
     }
+
+
+_ORG_ALIAS_MAP = {
+    "university of southern california": ["USC", "University of Southern California", "Trojans"],
+    "usc": ["USC", "University of Southern California"],
+    "massachusetts institute of technology": ["MIT", "Massachusetts Institute of Technology"],
+    "mit": ["MIT", "Massachusetts Institute of Technology"],
+    "stanford university": ["Stanford", "Stanford University"],
+    "university of california berkeley": ["UC Berkeley", "Berkeley", "UCB"],
+    "georgia institute of technology": ["Georgia Tech", "GT"],
+    "carnegie mellon university": ["CMU", "Carnegie Mellon"],
+    "university of california los angeles": ["UCLA", "University of California Los Angeles"],
+}
+
+
+def _org_aliases(org: Optional[str]) -> List[str]:
+    raw = (org or "").strip()
+    if not raw:
+        return []
+    out = [raw]
+    key = re.sub(r"\s+", " ", raw.lower())
+    mapped = _ORG_ALIAS_MAP.get(key)
+    if mapped:
+        for alias in mapped:
+            if alias not in out:
+                out.append(alias)
+        return out
+    # Unknown orgs: keep full string + meaningful tokens (skip filler words)
+    stop = {
+        "university",
+        "college",
+        "institute",
+        "of",
+        "the",
+        "and",
+        "at",
+        "southern",
+        "northern",
+        "eastern",
+        "western",
+        "state",
+    }
+    for tok in re.findall(r"[A-Za-z][A-Za-z&.-]{2,}", raw):
+        if tok.lower() in stop:
+            continue
+        if len(tok) < 4:
+            continue
+        if tok not in out:
+            out.append(tok)
+    return out
+
+
+def _blob_for_candidate(hit: Optional[dict], cand: Optional[dict]) -> str:
+    hit = hit or {}
+    cand = cand or {}
+    return " ".join(
+        [
+            cand.get("name") or "",
+            cand.get("company") or "",
+            cand.get("role") or "",
+            cand.get("location") or "",
+            cand.get("context") or "",
+            hit.get("title") or "",
+            (hit.get("text_snippet") or "")[:500],
+            hit.get("url") or "",
+        ]
+    ).lower()
+
+
+def _org_context_boost(
+    hit: dict,
+    cand: dict,
+    *,
+    company: Optional[str],
+    university: Optional[str],
+) -> float:
+    blob = _blob_for_candidate(hit, cand)
+    boost = 0.0
+    if university:
+        for alias in _org_aliases(university):
+            if alias.lower() in blob:
+                boost += 0.4
+                break
+    if company:
+        for alias in _org_aliases(company):
+            if alias.lower() in blob:
+                boost += 0.3
+                break
+    return boost
+
+
+def _candidate_matches_org(
+    cand: dict,
+    *,
+    company: Optional[str] = None,
+    university: Optional[str] = None,
+) -> bool:
+    blob = _blob_for_candidate(None, cand)
+    if university:
+        if any(a.lower() in blob for a in _org_aliases(university)):
+            return True
+    if company:
+        if any(a.lower() in blob for a in _org_aliases(company)):
+            return True
+    return False
 
 
 def _canonical_profile_url(url: Optional[str]) -> Optional[str]:
@@ -212,6 +391,7 @@ def search_person_exa(
     university: Optional[str] = None,
     place: Optional[str] = None,
     linkedin_url: Optional[str] = None,
+    search_constraints: Optional[dict] = None,
 ) -> dict:
     """Uses Exa's search API to find LinkedIn + public mentions.
 
@@ -223,6 +403,12 @@ def search_person_exa(
     api_key = os.environ.get("EXA_API_KEY")
     if not api_key:
         return {"status": "skipped", "reason": "EXA_API_KEY not set"}
+
+    sc = search_constraints or {}
+    company = sc.get("prefer_company") or company
+    university = sc.get("prefer_university") or university
+    reject_slugs = {s.lower() for s in (sc.get("reject_slugs") or []) if s}
+    exclude_domains = list(sc.get("reject_domains") or [])
 
     headers = {"x-api-key": api_key, "Content-Type": "application/json"}
     canonical = normalize_linkedin_url(linkedin_url)
@@ -278,14 +464,18 @@ def search_person_exa(
         general_query = f"{general_query} {slug}".strip()
     if company:
         general_query = f"{general_query} {company}".strip()
+    if sc.get("query_suffix"):
+        general_query = f"{general_query} {sc['query_suffix']}".strip()
+        print(f"  [exa] feedback query_suffix applied", flush=True)
 
+    exclude_domains = list(dict.fromkeys(["linkedin.com"] + exclude_domains))
     general_results = _run_search(
         headers,
         general_query,
         num_results=8,
         want_text=True,
         phrase_filters=phrase_filters,
-        exclude_domains=["linkedin.com"],
+        exclude_domains=exclude_domains,
     )
 
     mentions = []
@@ -293,6 +483,8 @@ def search_person_exa(
         snippet = result.get("text_snippet") or result.get("title") or ""
         # Soft identity filter: if we have company, prefer snippets that mention it or the slug
         blob = f"{snippet} {result.get('url') or ''} {result.get('title') or ''}".lower()
+        if reject_slugs and any(s in blob for s in reject_slugs):
+            continue
         if company and company.lower() not in blob and slug and slug not in blob:
             # Still keep if name appears strongly
             name_tokens = [t for t in name.lower().split() if len(t) > 2]

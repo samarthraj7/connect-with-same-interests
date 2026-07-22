@@ -114,6 +114,34 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  signupOtpSend: (email: string) =>
+    request<{ status: string; debug_code?: string; destination_hint?: string; expires_in?: number }>(
+      "/auth/signup/otp/send",
+      { method: "POST", body: JSON.stringify({ email }) },
+    ),
+  signupOtpVerify: (email: string, code: string) =>
+    request<{
+      status: string;
+      email_verified_token?: string;
+      email?: string;
+      verified?: boolean;
+    }>("/auth/signup/otp/verify", {
+      method: "POST",
+      body: JSON.stringify({ email, code }),
+    }),
+  publicStats: () =>
+    request<{
+      user_count: number;
+      user_count_display: string;
+      reviews: Array<{
+        id: string;
+        quote: string;
+        name: string;
+        role: string;
+        placeholder?: boolean;
+      }>;
+      icp: { headline: string; body: string; segments: string[] };
+    }>("/public/stats"),
   login: (email: string, password: string) =>
     request<{ token: string; user: UserPublic }>("/auth/login", {
       method: "POST",
@@ -135,7 +163,34 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  candidates: (name: string) =>
+  researchMeStart: (body: Record<string, unknown> = {}) =>
+    request<{ status: string; job_id: string }>("/me/research/start", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  researchMeJob: (jobId: string) =>
+    request<{
+      status: string;
+      stage?: string;
+      progress?: number;
+      message?: string;
+      error?: string | null;
+      result?: {
+        status: string;
+        needs_rating?: boolean;
+        draft_id?: string | null;
+        summary?: Record<string, any>;
+        name?: string;
+        company?: string | null;
+        user?: UserPublic;
+      } | null;
+    }>(`/me/research/jobs/${encodeURIComponent(jobId)}`),
+  candidates: (body: {
+    name: string;
+    company?: string | null;
+    university?: string | null;
+    linkedin_url?: string | null;
+  } | string) =>
     request<{
       candidates: any[];
       exact?: any[];
@@ -146,8 +201,57 @@ export const api = {
       warning?: string;
     }>("/candidates", {
       method: "POST",
-      body: JSON.stringify({ name }),
+      body: JSON.stringify(typeof body === "string" ? { name: body } : body),
     }),
+  publicCandidates: (body: {
+    name: string;
+    company?: string | null;
+    university?: string | null;
+    linkedin_url?: string | null;
+  }) =>
+    request<{
+      candidates: any[];
+      exact?: any[];
+      probable?: any[];
+      match_mode?: "exact" | "probable_only" | "none";
+      message?: string;
+      status: string;
+      warning?: string;
+    }>("/public/candidates", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  publicResearchStart: (body: {
+    name: string;
+    company?: string | null;
+    university?: string | null;
+    place?: string | null;
+    linkedin_url?: string | null;
+    force_refresh?: boolean;
+  }) =>
+    request<{ status: string; job_id: string }>("/public/research/start", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  publicResearchJob: (jobId: string) =>
+    request<{
+      status: string;
+      stage?: string;
+      progress?: number;
+      message?: string;
+      error?: string | null;
+      result?: {
+        status: string;
+        draft_id?: string | null;
+        needs_rating?: boolean;
+        summary?: Record<string, any>;
+        name?: string;
+        company?: string | null;
+        university?: string | null;
+        place?: string | null;
+        linkedin_url?: string | null;
+      } | null;
+    }>(`/public/research/jobs/${encodeURIComponent(jobId)}`),
   research: (body: Record<string, unknown>) =>
     request<any>("/research", { method: "POST", body: JSON.stringify(body) }),
   researchDraft: (draftId: string) => request<any>(`/research/drafts/${encodeURIComponent(draftId)}`),
@@ -156,8 +260,26 @@ export const api = {
     rating: "good" | "bad";
     wrong_notes?: string;
     wrong_categories?: string[];
+    auto_retry?: boolean;
   }) =>
     request<any>("/research/feedback", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  publicResearchFeedback: (body: {
+    draft_id: string;
+    rating?: "bad";
+    wrong_notes?: string;
+    wrong_categories?: string[];
+    auto_retry?: boolean;
+  }) =>
+    request<{
+      status: string;
+      rating?: string;
+      retried?: boolean;
+      job_id?: string;
+      message?: string;
+    }>("/public/research/feedback", {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -212,16 +334,6 @@ export const api = {
     request("/me/private/journal", { method: "POST", body: JSON.stringify(body) }),
   deletePrivateJournal: (id: string) =>
     request(`/me/private/journal/${id}`, { method: "DELETE" }),
-  publicCandidates: (body: Record<string, unknown>) =>
-    fetch(`${API_BASE}/public/candidates`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).then(async (res) => {
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.detail || data?.error || "Failed");
-      return data as { candidates: any[]; status: string };
-    }),
   sendOtp: (body: { channel: "email" | "phone"; destination?: string }) =>
     request<{ status: string; debug_code?: string; destination_hint?: string }>("/auth/otp/send", {
       method: "POST",
@@ -233,9 +345,39 @@ export const api = {
       body: JSON.stringify(body),
     }),
   calendarOAuthUrl: (redirectUri: string) =>
-    request<{ status: string; url?: string }>(
-      `/calendar/oauth-url?redirect_uri=${encodeURIComponent(redirectUri)}`
+    request<{ status: string; url?: string; reason?: string }>(
+      `/calendar/oauth-url?redirect_uri=${encodeURIComponent(redirectUri)}`,
     ),
+  calendarOAuth: (body: { code: string; redirect_uri: string }) =>
+    request<{ ok: boolean }>("/calendar/oauth", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   calendarSyncPrep: () => request<any>("/calendar/sync-prep", { method: "POST" }),
   calendarPrepQueue: () => request<{ queue: any[] }>("/calendar/prep-queue"),
+  identityResolve: (body: {
+    linkedin_url: string;
+    github_username?: string;
+    github_url?: string;
+    name?: string;
+    company?: string;
+    location?: string;
+    known_email?: string;
+  }) =>
+    request<{
+      status: string;
+      match: {
+        linkedin_url?: string;
+        candidate_url?: string;
+        score: number;
+        tier: "confirmed" | "possible" | "no_match";
+        evidence: string[];
+      };
+    }>("/identity/resolve", { method: "POST", body: JSON.stringify(body) }),
+  identityQueue: () => request<{ status: string; queue: any[] }>("/identity/queue"),
+  identityQueueDecide: (id: string, decision: "confirm" | "reject") =>
+    request<{ status: string; item: any }>(`/identity/queue/${encodeURIComponent(id)}`, {
+      method: "POST",
+      body: JSON.stringify({ decision }),
+    }),
 };

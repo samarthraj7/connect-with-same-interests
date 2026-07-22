@@ -38,6 +38,13 @@ def same_linkedin(a: Optional[str], b: Optional[str]) -> bool:
     return sa == sb
 
 
+def slugs_equivalent(a: Optional[str], b: Optional[str]) -> bool:
+    """True only for exact slug equality (mayuresh-choudhary ≠ mayureshchoudhary)."""
+    if not a or not b:
+        return False
+    return a.strip().lower() == b.strip().lower()
+
+
 def identity_lock_text(
     *,
     name: str,
