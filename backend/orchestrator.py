@@ -1,6 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import FrozenSet, Optional
+from typing import Any, Callable, Dict, FrozenSet, Optional
 
 from connectors import (
     apollo,
@@ -16,6 +16,8 @@ from connectors import (
     twitter,
 )
 
+ProgressCb = Optional[Callable[[str, float, str], None]]
+
 
 @dataclass
 class PersonQuery:
@@ -27,6 +29,17 @@ class PersonQuery:
     linkedin_url: Optional[str] = None
     email: Optional[str] = None
     domain: Optional[str] = None
+    # From prior bad feedback — shapes Gemini/Exa/social queries on retry
+    search_constraints: Optional[Dict[str, Any]] = None
+
+
+def _emit(on_progress: ProgressCb, stage: str, progress: float, message: str) -> None:
+    if not on_progress:
+        return
+    try:
+        on_progress(stage, float(progress), message)
+    except Exception as exc:
+        print(f"  [orchestrator] on_progress error: {exc}", flush=True)
 
 
 class SearchOrchestrator:
@@ -36,10 +49,16 @@ class SearchOrchestrator:
     → deep_agent (multi-hop) → social scrapers (1 Google attempt each via social_find).
     """
 
-    def run(self, query: PersonQuery, skip: FrozenSet[str] = frozenset()) -> dict:
+    def run(
+        self,
+        query: PersonQuery,
+        skip: FrozenSet[str] = frozenset(),
+        on_progress: ProgressCb = None,
+    ) -> dict:
         results = {}
 
         # Wave 0 — licensed enrichment first
+        _emit(on_progress, "enrichment", 0.08, "Enriching profile (Apollo / contact data)…")
         if "apollo" not in skip:
             results["apollo"] = apollo.enrich_person(
                 name=query.name,
@@ -85,6 +104,9 @@ class SearchOrchestrator:
             except Exception as exc:
                 results["enrichlayer"] = {"status": "error", "error": str(exc)[:200]}
 
+        _emit(on_progress, "enrichment", 0.18, "Licensed enrichment done")
+        _emit(on_progress, "web_search", 0.22, "Searching public web, news, and LinkedIn…")
+
         with ThreadPoolExecutor(max_workers=6) as pool:
             futures = {}
             if query.linkedin_url:
@@ -95,9 +117,11 @@ class SearchOrchestrator:
                     name=query.name,
                     username=query.github_username,
                     company=query.company,
+                    linkedin_url=query.linkedin_url,
                 )
             if "patents" not in skip:
                 futures["patents"] = pool.submit(patents.search_patents, name=query.name)
+            sc = query.search_constraints or None
             if "gemini_search" not in skip:
                 futures["gemini_search"] = pool.submit(
                     gemini_search.search_person,
@@ -106,6 +130,7 @@ class SearchOrchestrator:
                     university=query.university,
                     place=query.place,
                     linkedin_url=query.linkedin_url,
+                    search_constraints=sc,
                 )
             if "exa_search" not in skip:
                 futures["exa_search"] = pool.submit(
@@ -115,6 +140,7 @@ class SearchOrchestrator:
                     university=query.university,
                     place=query.place,
                     linkedin_url=query.linkedin_url,
+                    search_constraints=sc,
                 )
             if "personal_info" not in skip:
                 futures["personal_info"] = pool.submit(
@@ -139,7 +165,44 @@ class SearchOrchestrator:
         exa_result = results.get("exa_search")
         apollo_result = results.get("apollo") or {}
         if gemini_result is None and exa_result is None and apollo_result.get("status") != "ok":
+            _emit(on_progress, "web_search", 0.45, "Web search finished (limited hits)")
             return results
+
+        _emit(on_progress, "web_search", 0.48, "Web & personal research gathered")
+
+        # Nimble: university/company pages about the person + follow bio links
+        if "nimble_pages" not in skip:
+            try:
+                from connectors import nimble
+
+                if nimble.configured():
+                    _emit(
+                        on_progress,
+                        "nimble",
+                        0.50,
+                        "Extracting university/company pages (Nimble)…",
+                    )
+                    # Prefer company/university from query; fall back to Gemini/Apollo guesses
+                    co = query.company or apollo_result.get("organization_name") or (
+                        (gemini_result or {}).get("current_company")
+                    )
+                    uni = query.university
+                    results["nimble_pages"] = nimble.enrich_person_pages(
+                        name=query.name,
+                        company=co,
+                        university=uni,
+                        linkedin_url=query.linkedin_url,
+                        seed_sources=results,
+                    )
+                else:
+                    results["nimble_pages"] = {
+                        "status": "skipped",
+                        "reason": "NIMBLE_API_KEY not set",
+                        "pages": [],
+                    }
+            except Exception as exc:
+                results["nimble_pages"] = {"status": "error", "error": str(exc)[:300], "pages": []}
+                print(f"  [orchestrator] nimble error: {exc}", flush=True)
 
         social_links = dict((gemini_result or {}).get("social_profile_links") or {})
         linkedin_url = (
@@ -153,6 +216,7 @@ class SearchOrchestrator:
             results["linkedin_public"] = linkedin_public.fetch_linkedin_public(linkedin_url)
 
         # Wave — deep agent (after identity chosen + baseline connectors)
+        _emit(on_progress, "deep_agent", 0.55, "Deep multi-hop research…")
         if "deep_agent" not in skip:
             try:
                 from deep_agent import run_deep_agent
@@ -175,6 +239,8 @@ class SearchOrchestrator:
                 results["deep_agent"] = {"status": "error", "error": str(exc)[:300]}
                 print(f"  [orchestrator] deep_agent error: {exc}", flush=True)
 
+        _emit(on_progress, "deep_agent", 0.68, "Deep research pass complete")
+
         linkedin_result = results.get("linkedin_public") or {}
         el_result = results.get("enrichlayer") if isinstance(results.get("enrichlayer"), dict) else {}
         photo_url = (
@@ -196,6 +262,7 @@ class SearchOrchestrator:
         }
 
         # Social scrapers — discovery already 1-attempt via social_find inside fetch_*
+        _emit(on_progress, "socials", 0.72, "Matching public social profiles…")
         with ThreadPoolExecutor(max_workers=3) as pool:
             futures = {}
             if "instagram_public" not in skip:
@@ -233,4 +300,5 @@ class SearchOrchestrator:
             for source, future in futures.items():
                 results[source] = future.result()
 
+        _emit(on_progress, "socials", 0.84, "Social discovery finished")
         return results

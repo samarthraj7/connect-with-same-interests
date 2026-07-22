@@ -59,7 +59,12 @@ export default function Home() {
     }
     setLoadingCandidates(true);
     try {
-      const res = await api.candidates(name.trim());
+      const res = await api.candidates({
+        name: name.trim(),
+        company: company.trim() || null,
+        university: university.trim() || null,
+        linkedin_url: linkedin.trim() || null,
+      });
       const mode = res.match_mode || (res.exact?.length ? "exact" : res.probable?.length ? "probable_only" : "none");
       const list =
         mode === "exact"

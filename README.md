@@ -172,7 +172,9 @@ For a **per-file** description, see **[`docs/FILE_MAP.md`](docs/FILE_MAP.md)**.
 | POST | `/auth/signup` | Create account (+ optional self-research) |
 | POST | `/auth/login` | Login |
 | GET/PATCH | `/me`, `/me/profile` | Current user |
-| POST | `/me/research` | Re-research yourself (draft until rated) |
+| POST | `/me/research` | Re-research yourself (sync; draft until rated) |
+| POST | `/me/research/start` | Start self-research job (`job_id`) |
+| GET | `/me/research/jobs/{id}` | Poll real research stage progress |
 | POST | `/candidates` / `/public/candidates` | Find Me disambiguation |
 | POST | `/research` | Research a person (+ optional common ground) |
 | GET | `/research/drafts/{id}` | Load draft briefing |

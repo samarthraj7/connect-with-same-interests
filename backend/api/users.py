@@ -38,6 +38,10 @@ class UserStore:
             pass
         return user
 
+    def count(self) -> int:
+        index = self._index()
+        return len(index.get("email_to_id") or {})
+
     def create(
         self,
         *,

@@ -13,6 +13,7 @@ def verify_handles(
     name: str,
     company: Optional[str] = None,
     university: Optional[str] = None,
+    linkedin_url: Optional[str] = None,
     handles: dict[str, str],
 ) -> dict[str, Any]:
     """Return per-handle status: verified | ambiguous | rejected | skipped."""
@@ -20,6 +21,7 @@ def verify_handles(
         "name": name,
         "company": company,
         "university": university,
+        "linkedin_url": linkedin_url or handles.get("linkedin"),
     }
     results: dict[str, Any] = {}
 
@@ -47,20 +49,67 @@ def _status_from_match(match: Optional[dict]) -> str:
 
 def _verify_github(username: str, target: dict) -> dict:
     username = username.strip().lstrip("@")
-    data = github.search_github(name=target["name"], username=username, company=target.get("company"))
-    if data.get("status") != "ok":
+    linkedin_url = (target.get("linkedin_url") or "").strip() or None
+    data = github.search_github(
+        name=target["name"],
+        username=username,
+        company=target.get("company"),
+        linkedin_url=linkedin_url,
+    )
+    profile = data.get("profile") or {}
+    url = profile.get("html_url") or f"https://github.com/{username}"
+    im = data.get("identity_match")
+
+    if not im and linkedin_url:
+        try:
+            from identity_resolve import public_resolution, resolve_linkedin_github
+
+            im = public_resolution(
+                resolve_linkedin_github(
+                    linkedin_url=linkedin_url,
+                    github_username=username,
+                    name=target.get("name"),
+                    company=target.get("company"),
+                )
+            )
+        except Exception as exc:
+            return {
+                "status": "ambiguous",
+                "summary": f"identity_resolve error: {exc}",
+                "url": url,
+                "raw": data,
+            }
+
+    if im:
+        tier = im.get("tier")
+        if tier == "confirmed":
+            status = "verified"
+        elif tier == "possible":
+            status = "ambiguous"
+        else:
+            status = "rejected"
+        return {
+            "status": status,
+            "summary": f"GitHub @{username} · {tier} (score={im.get('score')})",
+            "url": url,
+            "identity_match": im,
+            "evidence": im.get("evidence") or [],
+        }
+
+    # No LinkedIn to resolve against — never "verified" on name alone
+    if data.get("status") not in ("ok", "ambiguous"):
         return {"status": "ambiguous", "summary": data.get("error") or data.get("status"), "raw": data}
-    # If exact username fetch worked, treat as verified when profile name loosely matches
-    profile = data.get("profile") or data.get("user") or data
-    display = (profile.get("name") or profile.get("login") or "").lower()
-    claimed = (target.get("name") or "").lower()
-    parts = claimed.split()
-    ok = any(p and p in display for p in parts) or username.lower() in claimed.replace(" ", "")
-    status = "verified" if ok else "ambiguous"
     return {
-        "status": status,
-        "summary": f"GitHub @{username}" + (" matches name" if ok else " — name unclear"),
-        "url": profile.get("html_url") or f"https://github.com/{username}",
+        "status": "ambiguous",
+        "summary": f"GitHub @{username} fetched — LinkedIn required to confirm same person",
+        "url": url,
+        "identity_match": {
+            "linkedin_url": None,
+            "candidate_url": url,
+            "score": 0.0,
+            "tier": "no_match",
+            "evidence": ["No LinkedIn URL provided for corroboration"],
+        },
     }
 
 

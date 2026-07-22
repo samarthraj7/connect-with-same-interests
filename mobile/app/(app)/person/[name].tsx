@@ -204,6 +204,10 @@ export default function PersonDetail() {
       setShowBadForm(true);
       return;
     }
+    if (rating === "bad" && !ratingNotes.trim()) {
+      setError("Tell us what was wrong so re-research can fix it.");
+      return;
+    }
     setRatingBusy(true);
     setError("");
     try {
@@ -212,10 +216,11 @@ export default function PersonDetail() {
         rating,
         wrong_notes: rating === "bad" ? ratingNotes.trim() || undefined : undefined,
         wrong_categories: rating === "bad" ? ["quality"] : undefined,
+        auto_retry: false,
       });
-      setPendingDraftId(null);
       setShowBadForm(false);
       if (rating === "good" && res.committed) {
+        setPendingDraftId(null);
         const li = res.linkedin_url || res.contact?.linkedin_url || pickedLinkedin;
         if (li) setPickedLinkedin(li);
         setData((d: any) => ({
@@ -227,13 +232,41 @@ export default function PersonDetail() {
           contact: { ...(res.contact || d?.contact || {}), ...(li ? { linkedin_url: li } : {}) },
           linkedin_url: li,
         }));
-      } else {
-        setError(
-          res.message ||
-            "Marked as bad — not saved. Tell us what was wrong, then research again to improve.",
-        );
-        setTimeout(() => router.back(), 1600);
+        return;
       }
+
+      // Bad → re-research same identity with stored corrections
+      setPendingDraftId(null);
+      setError("Re-researching with your corrections…");
+      const researched = await api.research({
+        name: res.name || name,
+        company: res.company || company || null,
+        university: res.university || null,
+        linkedin_url: res.linkedin_url || pickedLinkedin || null,
+        force_refresh: true,
+        auto_commit: false,
+      });
+      if (researched.needs_rating && researched.draft_id) {
+        setPendingDraftId(researched.draft_id);
+        setRatingNotes("");
+        setData({
+          name: researched.name || name,
+          company: researched.company || company || "",
+          summary: researched.summary,
+          conversation: researched.conversation,
+          mutuals: researched.mutuals,
+          in_your_network: researched.in_your_network,
+          needs_rating: true,
+          draft_id: researched.draft_id,
+          linkedin_url: researched.linkedin_url || pickedLinkedin,
+          contact: researched.contact || {},
+          sources: researched.sources || {},
+        });
+        setError("New draft ready — review again.");
+        return;
+      }
+      setError(res.message || "Marked as bad — not saved.");
+      setTimeout(() => router.back(), 1600);
     } catch (e: any) {
       setError(e.message || "Could not save rating");
     } finally {
@@ -333,7 +366,7 @@ export default function PersonDetail() {
             <View style={styles.rateBox}>
               <Text style={styles.rateTitle}>Is this research good?</Text>
               <Text style={styles.cardMeta}>
-                Good saves it to your people DB. Bad discards it and stores what went wrong so the next run can improve.
+                Good saves it to your people DB. Bad stores what was wrong and re-researches with those corrections.
               </Text>
               {showBadForm ? (
                 <>
@@ -345,7 +378,7 @@ export default function PersonDetail() {
                     multiline
                   />
                   <Button
-                    title="Submit bad + discard"
+                    title="Fix & re-research"
                     variant="ember"
                     loading={ratingBusy}
                     onPress={() => submitRating("bad")}

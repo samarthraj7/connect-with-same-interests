@@ -16,6 +16,7 @@ VERIFIED_PAGE_LIMIT = 8
 
 # Prose first — Gemini+Google Search often returns empty parts when asked for JSON-only.
 CANDIDATE_SEARCH_PROMPT = """Use Google Search to find distinct real people named "{name}".
+{hint_block}
 Write a numbered list of up to 8 individuals you have evidence for.
 For each person include: name, company (or null), role/title, location, LinkedIn URL if any,
 a publicly reachable profile PHOTO URL if any search result/thumbnail shows one
@@ -150,9 +151,46 @@ def _response_text(response) -> str:
     return "\n".join(chunks).strip()
 
 
-def _grounded_search_notes(client, name: str) -> Tuple[str, object]:
+def _candidate_hint_block(
+    *,
+    company: Optional[str] = None,
+    university: Optional[str] = None,
+    linkedin_url: Optional[str] = None,
+) -> str:
+    bits = []
+    if university:
+        bits.append(
+            f'Prioritize people connected to university/school "{university}" '
+            f'(alumni, student, faculty, MSCS/MS/BS). Search queries like: '
+            f'"{university}" with the name, and common short names for that school.'
+        )
+    if company:
+        bits.append(
+            f'Prioritize people who work(ed) at "{company}". '
+            f'Search "{company}" together with the name on LinkedIn and the open web.'
+        )
+    if linkedin_url:
+        bits.append(f"If possible, confirm or locate this LinkedIn profile: {linkedin_url}")
+    if not bits:
+        return ""
+    return "DISAMBIGUATION HINTS (must prefer matching people over unrelated same-name hits):\n- " + "\n- ".join(bits)
+
+
+def _grounded_search_notes(
+    client,
+    name: str,
+    *,
+    company: Optional[str] = None,
+    university: Optional[str] = None,
+    linkedin_url: Optional[str] = None,
+) -> Tuple[str, object]:
     """Phase 1: Google Search → prose notes. Retries once if Gemini returns empty parts."""
-    prompt = CANDIDATE_SEARCH_PROMPT.format(name=name)
+    prompt = CANDIDATE_SEARCH_PROMPT.format(
+        name=name,
+        hint_block=_candidate_hint_block(
+            company=company, university=university, linkedin_url=linkedin_url
+        ),
+    )
     last_resp = None
     for attempt in range(2):
         print(f"[find_candidates] phase1 search attempt {attempt + 1}/2…", flush=True)
@@ -195,60 +233,116 @@ def _notes_to_candidates_json(client, notes: str) -> Optional[dict]:
     return parsed
 
 
-def find_candidates(name: str, *, enrich_photos: bool = True) -> dict:
+def find_candidates(
+    name: str,
+    *,
+    company: Optional[str] = None,
+    university: Optional[str] = None,
+    linkedin_url: Optional[str] = None,
+    enrich_photos: bool = True,
+) -> dict:
     """Disambiguate a name before the expensive multi-angle deep dive.
 
-    Primary path (no company / university / LinkedIn required):
-      Exa LinkedIn people web search → linkedin.com/in/… profiles
-    Fallback: Gemini Google Search when Exa finds nobody.
-    Split: exact name matches only; if none, probable people + message.
-    Enrich: Apollo + Enrich Layer for company/role/location/photo/LinkedIn
-    on the visible bucket only.
+    Primary path: Exa LinkedIn people search (biased by company/university when set).
+    When filters are present, also run Gemini Google Search and merge — filters must
+    affect discovery, not only a soft post-filter on a name-only shortlist.
+    If linkedin_url is provided, return that profile as the top candidate.
     """
-    print(f"[find_candidates] START name={name!r} model={MODEL}", flush=True)
+    company = (company or "").strip() or None
+    university = (university or "").strip() or None
+    linkedin_url = (linkedin_url or "").strip() or None
+    print(
+        f"[find_candidates] START name={name!r} company={company!r} "
+        f"university={university!r} linkedin={linkedin_url!r} model={MODEL}",
+        flush=True,
+    )
     warning = None
     candidates: list = []
     discovery = "none"
+    has_filters = bool(company or university or linkedin_url)
 
-    # ── 1) LinkedIn people web search via Exa (name only) ──────────────────
+    # ── 0) Explicit LinkedIn URL → single-card shortcut ────────────────────
+    if linkedin_url:
+        try:
+            from identity_lock import normalize_linkedin_url
+            from connectors.exa_search import _canonical_profile_url
+
+            canon = normalize_linkedin_url(linkedin_url) or _canonical_profile_url(linkedin_url)
+        except Exception:
+            canon = linkedin_url
+        if canon:
+            candidates = [
+                {
+                    "name": name.strip(),
+                    "company": company,
+                    "role": None,
+                    "location": None,
+                    "linkedin_url": canon,
+                    "photo_url": None,
+                    "context": f"LinkedIn URL you provided{' · ' + university if university else ''}",
+                    "source": "linkedin_url_input",
+                    "_score": 1.2,
+                }
+            ]
+            discovery = "linkedin_url"
+
+    # ── 1) LinkedIn people web search via Exa ──────────────────────────────
     try:
         from connectors import exa_search
 
         print("[find_candidates] primary: Exa LinkedIn people search…", flush=True)
-        exa = exa_search.find_linkedin_people_by_name(name)
+        exa = exa_search.find_linkedin_people_by_name(
+            name,
+            company=company,
+            university=university,
+            max_people=12 if has_filters else 8,
+        )
         print(
             f"[find_candidates] exa status={exa.get('status')} "
-            f"n={len(exa.get('candidates') or [])}",
+            f"n={len(exa.get('candidates') or [])} "
+            f"filter_matched={exa.get('filter_matched')}",
             flush=True,
         )
         if exa.get("status") == "ok" and exa.get("candidates"):
-            candidates = [c for c in exa["candidates"] if isinstance(c, dict)]
-            discovery = "exa_linkedin_people"
+            exa_cands = [c for c in exa["candidates"] if isinstance(c, dict)]
+            candidates = _merge_candidates(candidates, exa_cands)
+            discovery = "exa_linkedin_people" if discovery == "none" else f"{discovery}+exa"
     except Exception as exc:
         print(f"[find_candidates] exa exception: {exc}", flush=True)
 
-    # ── 2) Gemini grounded web search if Exa empty / skipped ───────────────
-    if not candidates:
+    # ── 2) Gemini Google Search — always when filters set, else if Exa empty
+    run_gemini = (not candidates) or has_filters
+    if run_gemini:
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
-            print("[find_candidates] no Exa hits and GEMINI_API_KEY not set", flush=True)
-            if not os.environ.get("EXA_API_KEY"):
+            print("[find_candidates] Gemini skipped (no GEMINI_API_KEY)", flush=True)
+            if not candidates and not os.environ.get("EXA_API_KEY"):
                 return {
                     "status": "skipped",
                     "error": "EXA_API_KEY and GEMINI_API_KEY not set",
                     "candidates": [],
                 }
         else:
-            print("[find_candidates] fallback: Gemini Google Search…", flush=True)
+            why = "filters present — merge Google Search" if candidates else "Exa empty — fallback"
+            print(f"[find_candidates] Gemini Google Search ({why})…", flush=True)
             client = genai.Client(api_key=api_key)
+            notes = ""
             try:
-                notes, _resp = _grounded_search_notes(client, name)
+                notes, _resp = _grounded_search_notes(
+                    client,
+                    name,
+                    company=company,
+                    university=university,
+                    linkedin_url=linkedin_url,
+                )
             except (errors.ClientError, errors.ServerError) as exc:
                 print(f"[find_candidates] Gemini API ERROR: {exc}", flush=True)
-                return {"status": "error", "error": str(exc), "candidates": []}
+                if not candidates:
+                    return {"status": "error", "error": str(exc), "candidates": []}
             except Exception as exc:
                 print(f"[find_candidates] UNEXPECTED ERROR: {type(exc).__name__}: {exc}", flush=True)
-                return {"status": "error", "error": str(exc), "candidates": []}
+                if not candidates:
+                    return {"status": "error", "error": str(exc), "candidates": []}
 
             if notes.strip():
                 try:
@@ -256,15 +350,31 @@ def find_candidates(name: str, *, enrich_photos: bool = True) -> dict:
                 except Exception as exc:
                     print(f"[find_candidates] phase2 ERROR: {exc}", flush=True)
                     parsed = _extract_json(notes)
-                if parsed is None:
+                if parsed is None and not candidates:
                     return {
                         "status": "error",
                         "error": "could not parse Gemini response as JSON",
                         "raw_text": notes[:2000],
                         "candidates": [],
                     }
-                candidates = [c for c in (parsed.get("candidates") or []) if isinstance(c, dict)]
-                discovery = "gemini_search"
+                gem_cands = [c for c in ((parsed or {}).get("candidates") or []) if isinstance(c, dict)]
+                if gem_cands:
+                    for c in gem_cands:
+                        try:
+                            from connectors.exa_search import _candidate_matches_org
+
+                            if _candidate_matches_org(c, company=company, university=university):
+                                c["_score"] = max(float(c.get("_score") or 0.5), 0.95)
+                            else:
+                                c["_score"] = float(c.get("_score") or 0.4)
+                        except Exception:
+                            c["_score"] = float(c.get("_score") or 0.4)
+                    candidates = _merge_candidates(candidates, gem_cands)
+                    discovery = (
+                        "gemini_search"
+                        if discovery in ("none",)
+                        else f"{discovery}+gemini"
+                    )
 
     from name_match import exact_match_message, partition_candidates
 
@@ -272,10 +382,10 @@ def find_candidates(name: str, *, enrich_photos: bool = True) -> dict:
         print("[find_candidates] EMPTY — typed-name passthrough", flush=True)
         passthrough = {
             "name": name.strip(),
-            "company": None,
+            "company": company,
             "role": None,
             "location": None,
-            "linkedin_url": None,
+            "linkedin_url": linkedin_url,
             "photo_url": None,
             "context": "No LinkedIn people matches found for this name. Add company, university, or LinkedIn, or continue as typed.",
         }
@@ -294,6 +404,31 @@ def find_candidates(name: str, *, enrich_photos: bool = True) -> dict:
             "warning": warning,
         }
 
+    # Prefer org-matching people when filters were provided
+    if has_filters and (company or university):
+        try:
+            from connectors.exa_search import _candidate_matches_org
+
+            matched = [
+                c for c in candidates if _candidate_matches_org(c, company=company, university=university)
+            ]
+            others = [c for c in candidates if c not in matched]
+            if matched:
+                print(
+                    f"[find_candidates] org-filter prefer {len(matched)} / {len(candidates)}",
+                    flush=True,
+                )
+                candidates = matched
+            else:
+                warning = "filters_no_org_match"
+                print(
+                    "[find_candidates] filters set but no candidate text mentioned org — "
+                    "showing name matches; try a LinkedIn URL",
+                    flush=True,
+                )
+        except Exception as exc:
+            print(f"[find_candidates] org prefer skipped: {exc}", flush=True)
+
     print(f"[find_candidates] discovery={discovery} count={len(candidates)}", flush=True)
     for i, c in enumerate(candidates):
         print(
@@ -311,7 +446,6 @@ def find_candidates(name: str, *, enrich_photos: bool = True) -> dict:
     elif match_mode == "probable_only":
         to_enrich = list(parted["probable"])
     else:
-        # All hits failed the probable floor — still show them as probable, not empty.
         to_enrich = [{k: v for k, v in c.items() if k != "_score"} for c in candidates if isinstance(c, dict)]
         match_mode = "probable_only" if to_enrich else "none"
 
@@ -331,19 +465,20 @@ def find_candidates(name: str, *, enrich_photos: bool = True) -> dict:
     else:
         print("[find_candidates] Apollo/Enrich Layer enrich SKIPPED", flush=True)
 
-    # Strip any leftover scores
     for c in to_enrich:
         if isinstance(c, dict):
             c.pop("_score", None)
 
     exact = to_enrich if match_mode == "exact" else []
     probable = to_enrich if match_mode == "probable_only" else []
-    # Keep the other bucket empty in the response when we only enriched the visible set
     if match_mode == "exact":
-        # Still return unenriched probable for debugging? User asked: show ONLY exact when exact exists.
         probable = []
     display = exact if match_mode == "exact" else probable
     msg = exact_match_message(match_mode)
+    if warning == "filters_no_org_match":
+        msg = ((msg + " ") if msg else "") + (
+            "University/company didn’t match any headline yet — pick carefully or paste a LinkedIn URL."
+        )
 
     print(
         f"[find_candidates] DONE status=ok match_mode={match_mode} "
@@ -363,6 +498,44 @@ def find_candidates(name: str, *, enrich_photos: bool = True) -> dict:
     if warning:
         out["warning"] = warning
     return out
+
+
+def _merge_candidates(primary: list, extra: list) -> list:
+    """Merge candidate cards by LinkedIn URL (preferred) or name+company."""
+    out: list = []
+    seen_li: set = set()
+    seen_key: set = set()
+
+    def _li_key(c: dict) -> str:
+        return (c.get("linkedin_url") or "").strip().lower().rstrip("/")
+
+    def _nk(c: dict) -> str:
+        return f"{(c.get('name') or '').strip().lower()}|{(c.get('company') or '').strip().lower()}"
+
+    for group in (primary, extra):
+        for c in group or []:
+            if not isinstance(c, dict):
+                continue
+            li = _li_key(c)
+            key = _nk(c)
+            if li and li in seen_li:
+                for i, existing in enumerate(out):
+                    if _li_key(existing) == li:
+                        if float(c.get("_score") or 0) > float(existing.get("_score") or 0):
+                            out[i] = {**existing, **{k: v for k, v in c.items() if v}}
+                        else:
+                            out[i] = {**c, **{k: v for k, v in existing.items() if v}}
+                        break
+                continue
+            if not li and key in seen_key:
+                continue
+            if li:
+                seen_li.add(li)
+            seen_key.add(key)
+            out.append(dict(c))
+    out.sort(key=lambda c: -float(c.get("_score") or 0))
+    return out
+
 
 
 def _enrich_candidate_photos(candidates: list) -> list:
@@ -649,6 +822,7 @@ def search_person(
     university: Optional[str] = None,
     place: Optional[str] = None,
     linkedin_url: Optional[str] = None,
+    search_constraints: Optional[dict] = None,
 ) -> dict:
     """Runs several targeted searches in parallel instead of one blended
     query — name+company, name+university, name+place (whichever hints are
@@ -664,7 +838,18 @@ def search_person(
     if not api_key:
         return {"status": "skipped", "reason": "GEMINI_API_KEY not set"}
 
-    angles = _build_angles(name, company, university, place, linkedin_url=linkedin_url)
+    sc = search_constraints or {}
+    company = sc.get("prefer_company") or company
+    university = sc.get("prefer_university") or university
+
+    angles = _build_angles(
+        name,
+        company,
+        university,
+        place,
+        linkedin_url=linkedin_url,
+        search_constraints=sc,
+    )
     for angle, _, description in angles:
         print(f"  querying ({angle} angle): {description}")
 
@@ -682,6 +867,7 @@ def _build_angles(
     university: Optional[str],
     place: Optional[str],
     linkedin_url: Optional[str] = None,
+    search_constraints: Optional[dict] = None,
 ) -> List[Tuple[str, str, str]]:
     from identity_lock import identity_lock_text, normalize_linkedin_url
 
@@ -692,6 +878,10 @@ def _build_angles(
         university=university,
     )
     li = normalize_linkedin_url(linkedin_url)
+    sc = search_constraints or {}
+    constraint_block = (sc.get("prompt_block") or "").strip()
+    if constraint_block:
+        lock = f"{lock}\n\n{constraint_block}"
 
     def wrap(focus: str) -> str:
         return f"{lock}\n\nPerson: {name}\nCompany: {company or '(unknown)'}\nUniversity: {university or '(unknown)'}\nLinkedIn: {li or '(unknown)'}\n\n{focus}\n\n{_SHARED_INSTRUCTIONS}"
@@ -732,6 +922,10 @@ def _build_angles(
             f" Prioritize pages that reference this LinkedIn profile ({li}) or the same "
             f"employer/school. Skip biographies of other people named {name}."
         )
+    if sc.get("reject_slugs"):
+        general_focus += (
+            f" Do not use or cite LinkedIn profiles with slugs: {', '.join(sc['reject_slugs'])}."
+        )
     angles.append((
         "general",
         wrap(general_focus),
@@ -765,7 +959,7 @@ def _run_angle(client, prompt: str) -> dict:
 
 
 def _merge_angles(angle_results: dict, canonical_linkedin: Optional[str] = None) -> dict:
-    from identity_lock import normalize_linkedin_url, same_linkedin
+    from identity_lock import linkedin_slug, normalize_linkedin_url, same_linkedin
 
     canonical = normalize_linkedin_url(canonical_linkedin)
     filtered = {}
@@ -784,6 +978,38 @@ def _merge_angles(angle_results: dict, canonical_linkedin: Optional[str] = None)
                 flush=True,
             )
             continue
+        # Also drop angles that only cite Peerlist/other pages declaring a different LI
+        if canonical:
+            from identity_filter import text_declares_other_linkedin
+
+            blob = " ".join(
+                [
+                    str(result.get("bio_summary") or ""),
+                    str(result.get("current_role") or ""),
+                    str(result.get("current_company") or ""),
+                    " ".join(str(x) for x in (result.get("education") or [])),
+                    " ".join(
+                        str((p or {}).get("source_url") or (p or {}).get("topic") or "")
+                        for p in (result.get("public_posts_or_writing") or [])
+                        if isinstance(p, dict)
+                    ),
+                    " ".join(str(u) for u in (result.get("_source_urls") or [])),
+                ]
+            )
+            if text_declares_other_linkedin(blob, canonical):
+                print(
+                    f"  [identity] drop angle={angle} — body references another LinkedIn slug",
+                    flush=True,
+                )
+                continue
+            # Peerlist-only angles without canonical slug mention are unsafe
+            src_blob = " ".join(str(u) for u in (result.get("_source_urls") or [])).lower()
+            if "peerlist.io" in src_blob and linkedin_slug(canonical) not in blob.lower():
+                print(
+                    f"  [identity] drop angle={angle} — Peerlist without canonical LinkedIn corroboration",
+                    flush=True,
+                )
+                continue
         # Force canonical LinkedIn onto matching angles
         if canonical:
             links = dict(links) if isinstance(links, dict) else {}
@@ -792,7 +1018,21 @@ def _merge_angles(angle_results: dict, canonical_linkedin: Optional[str] = None)
             result["social_profile_links"] = links
         filtered[angle] = result
 
-    angle_results = filtered or angle_results
+    # Do NOT fall back to unfiltered angles — empty is safer than mixing identities
+    angle_results = filtered
+    if not angle_results:
+        return {
+            "found": False,
+            "status": "not_found",
+            "reason": "all Gemini angles conflicted with canonical LinkedIn",
+            "canonical_linkedin_url": canonical,
+            "social_profile_links": {"linkedin": canonical} if canonical else {},
+            "career_history": [],
+            "education": [],
+            "public_posts_or_writing": [],
+            "sources": [],
+            "verified_pages": [],
+        }
     ordered = [angle_results[a] for a in _ANGLE_PRIORITY if a in angle_results]
 
     merged = {
@@ -823,7 +1063,7 @@ def _merge_angles(angle_results: dict, canonical_linkedin: Optional[str] = None)
 
     all_urls = _dedupe_urls((r.get("_source_urls") or []) for r in ordered)
     merged["sources"] = [{"url": url, "title": title} for url, title in all_urls]
-    merged["verified_pages"] = [fetch_open_graph(url) for url, _ in all_urls[:VERIFIED_PAGE_LIMIT]]
+    merged["verified_pages"] = _verify_source_pages(all_urls[:VERIFIED_PAGE_LIMIT])
 
     any_angle_settled = any(r.get("status") in ("ok", "not_found") for r in ordered)
     if merged["found"]:
@@ -834,6 +1074,40 @@ def _merge_angles(angle_results: dict, canonical_linkedin: Optional[str] = None)
         merged["status"] = "error"
         merged["error"] = "; ".join(r["error"] for r in ordered if r.get("error"))
     return merged
+
+
+def _verify_source_pages(url_title_pairs: List[Tuple[str, str]]) -> list:
+    """Enrich grounding URLs with page body — Nimble when configured, else Open Graph."""
+    urls = [u for u, _ in (url_title_pairs or []) if u]
+    titles = {u: t for u, t in (url_title_pairs or []) if u}
+
+    try:
+        from connectors import nimble
+
+        if nimble.configured() and urls:
+            result = nimble.extract_many(urls, max_pages=VERIFIED_PAGE_LIMIT)
+            pages = []
+            for p in result.get("pages") or []:
+                if p.get("status") != "ok":
+                    continue
+                pages.append(
+                    {
+                        "status": "ok",
+                        "requested_url": p.get("url"),
+                        "url": p.get("final_url") or p.get("url"),
+                        "title": p.get("title") or titles.get(p.get("url") or ""),
+                        "description": (p.get("markdown") or p.get("text") or "")[:800],
+                        "markdown": (p.get("markdown") or "")[:4000] or None,
+                        "extractor": "nimble",
+                    }
+                )
+            if pages:
+                return pages
+            print("  [gemini] Nimble verified_pages empty — falling back to Open Graph", flush=True)
+    except Exception as exc:
+        print(f"  [gemini] Nimble verify skip: {exc}", flush=True)
+
+    return [fetch_open_graph(url) for url, _ in url_title_pairs]
 
 
 def _first_non_null(ordered: list, field: str):

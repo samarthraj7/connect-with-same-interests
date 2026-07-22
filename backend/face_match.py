@@ -135,7 +135,8 @@ def compare_faces(
             continue
         c = usable[idx]
         score = _clamp_score(row.get("score"))
-        same = bool(row.get("same_person")) and score >= 55
+        # Stricter: do not mark same_person below 75
+        same = bool(row.get("same_person")) and score >= 75
         rankings.append(
             {
                 "handle": c["handle"],
@@ -151,7 +152,8 @@ def compare_faces(
     rankings.sort(key=lambda r: (-r["score"], -int(r["same_person"])))
     best = rankings[0] if rankings else None
     accepted = None
-    if best and best["same_person"] and best["score"] >= 70:
+    # Require high confidence before attaching a social photo to a LinkedIn identity
+    if best and best["same_person"] and best["score"] >= 85:
         accepted = best
 
     print(

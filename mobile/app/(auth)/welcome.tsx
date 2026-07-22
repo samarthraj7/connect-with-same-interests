@@ -14,6 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { AuthModal } from "../../components/AuthModal";
 import { SignupSheet } from "../../components/SignupSheet";
 import { Button } from "../../components/ui";
+import { api } from "../../lib/api";
 import { fonts, space } from "../../lib/theme";
 
 const TAGLINES = [
@@ -24,13 +25,13 @@ const TAGLINES = [
 ];
 
 const PREVIEW_LINES = [
-  { kind: "name", text: "Farshad Kheiri" },
-  { kind: "meta", text: "Oaktree · Manhattan Beach" },
+  { kind: "name", text: "Samarth Rajendra" },
+  { kind: "meta", text: "USC · Los Angeles" },
   { kind: "section", text: "Things to talk about" },
-  { kind: "hook", text: "Shared coastal California roots — ask about growing up near the water." },
-  { kind: "hook", text: "Credit markets & distressed debt — open with a recent interview angle." },
+  { kind: "hook", text: "MS CS (AI) at USC, 4.0 GPA — targeting HRT, NVIDIA, Amazon Robotics, SpaceX." },
+  { kind: "hook", text: "Building NavLang and FailureNet — language-conditioned nav and multimodal fault detection for robotics." },
   { kind: "section", text: "Opener" },
-  { kind: "opener", text: "“I saw your take on credit cycles — curious what you’re watching next.”" },
+  { kind: "opener", text: "“I'm building a conversation-prep tool for exactly this — mind if I ask what you're working on?”" },
 ];
 
 const STEPS = [
@@ -48,6 +49,32 @@ const STEPS = [
   },
 ];
 
+const FALLBACK_REVIEWS = [
+  {
+    id: "placeholder-1",
+    quote: "Walked into the meeting already knowing what we shared. Felt natural, not stalky.",
+    name: "Alex M.",
+    role: "Founder",
+  },
+  {
+    id: "placeholder-2",
+    quote: "The LinkedIn lock alone saved me from briefing the wrong person twice.",
+    name: "Priya S.",
+    role: "BD lead",
+  },
+  {
+    id: "placeholder-3",
+    quote: "Common ground tips that actually matched — not generic icebreakers.",
+    name: "Jordan L.",
+    role: "Investor",
+  },
+];
+
+const FALLBACK_ICP = {
+  headline: "Built for people who meet for a living",
+  body: "Founders, operators, investors, and sales leaders who prep before intros — and refuse to mix up same-name strangers.",
+  segments: ["Founders & operators", "Investors & advisors", "BD / partnerships", "Recruiters & talent"],
+};
 function BriefingPreview({ wide }: { wide: boolean }) {
   const opacities = useRef(PREVIEW_LINES.map(() => new Animated.Value(0))).current;
   const slides = useRef(PREVIEW_LINES.map(() => new Animated.Value(14))).current;
@@ -150,6 +177,27 @@ export default function Welcome() {
   const [tagIndex, setTagIndex] = useState(0);
   const [loginOpen, setLoginOpen] = useState(false);
   const [signupOpen, setSignupOpen] = useState(false);
+  const [userCountDisplay, setUserCountDisplay] = useState<string | null>(null);
+  const [reviews, setReviews] = useState(FALLBACK_REVIEWS);
+  const [icp, setIcp] = useState(FALLBACK_ICP);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .publicStats()
+      .then((s) => {
+        if (cancelled) return;
+        if (s.user_count_display != null) setUserCountDisplay(s.user_count_display);
+        if (s.reviews?.length) setReviews(s.reviews);
+        if (s.icp) setIcp(s.icp);
+      })
+      .catch(() => {
+        /* keep placeholders */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     Animated.parallel([
@@ -264,6 +312,11 @@ export default function Welcome() {
                 <Text style={styles.support}>
                   Identity-locked research and real common ground before the meeting.
                 </Text>
+                {userCountDisplay != null ? (
+                  <Text style={styles.statLine}>
+                    {userCountDisplay} {Number(userCountDisplay.replace(/,/g, "")) === 1 ? "person" : "people"} already researching
+                  </Text>
+                ) : null}
               </View>
 
               <BriefingPreview wide={wide} />
@@ -287,6 +340,34 @@ export default function Welcome() {
                 onPress={() => setSignupOpen(true)}
                 style={styles.getStarted}
               />
+            </View>
+
+            <View style={[styles.section, wide && styles.howWide]}>
+              <Text style={styles.howTitle}>{icp.headline}</Text>
+              <Text style={styles.howLead}>{icp.body}</Text>
+              <View style={[styles.icpRow, wide && styles.icpRowWide]}>
+                {icp.segments.map((seg) => (
+                  <Text key={seg} style={styles.icpSeg}>
+                    {seg}
+                  </Text>
+                ))}
+              </View>
+            </View>
+
+            <View style={[styles.section, wide && styles.howWide]}>
+              <Text style={styles.howTitle}>What people say</Text>
+              <Text style={styles.howLead}>Early notes from people who prep before they walk in.</Text>
+              <View style={[styles.reviews, wide && styles.reviewsWide]}>
+                {reviews.map((r) => (
+                  <View key={r.id} style={styles.review}>
+                    <Text style={styles.reviewQuote}>“{r.quote}”</Text>
+                    <Text style={styles.reviewBy}>
+                      {r.name}
+                      {r.role ? ` · ${r.role}` : ""}
+                    </Text>
+                  </View>
+                ))}
+              </View>
             </View>
           </ScrollView>
         </Animated.View>
@@ -431,6 +512,62 @@ const styles = StyleSheet.create({
     lineHeight: 23,
     color: "rgba(251,252,250,0.62)",
     maxWidth: 360,
+  },
+  statLine: {
+    marginTop: 16,
+    fontFamily: fonts.bodySemi,
+    fontSize: 14,
+    color: "rgba(232, 160, 122, 0.95)",
+    letterSpacing: 0.2,
+  },
+  section: {
+    marginTop: space.xxl,
+    paddingTop: space.xl,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(251,252,250,0.12)",
+  },
+  icpRow: {
+    gap: 10,
+    marginTop: 4,
+  },
+  icpRowWide: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+  icpSeg: {
+    fontFamily: fonts.bodyMed,
+    fontSize: 14,
+    color: "rgba(251,252,250,0.78)",
+    borderLeftWidth: 2,
+    borderLeftColor: "rgba(232, 160, 122, 0.65)",
+    paddingLeft: 10,
+    paddingVertical: 4,
+  },
+  reviews: {
+    gap: space.lg,
+  },
+  reviewsWide: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 24,
+  },
+  review: {
+    flexGrow: 1,
+    flexBasis: 260,
+    maxWidth: 340,
+  },
+  reviewQuote: {
+    fontFamily: fonts.body,
+    fontSize: 16,
+    lineHeight: 24,
+    color: "rgba(251,252,250,0.88)",
+  },
+  reviewBy: {
+    marginTop: 10,
+    fontFamily: fonts.bodyMed,
+    fontSize: 13,
+    color: "rgba(232, 160, 122, 0.9)",
   },
   previewShell: {
     position: "relative",

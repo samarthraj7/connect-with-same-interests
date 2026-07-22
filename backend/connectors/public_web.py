@@ -71,18 +71,60 @@ def search_public_presence(
             seen.add(url)
             all_hits.append(h)
 
-    portfolios = [h for h in all_hits if _looks_portfolio(h)]
-    blogs = [h for h in all_hits if _looks_writing(h) and h not in portfolios]
-    other = [h for h in all_hits if h not in portfolios and h not in blogs]
+    def page_ok(u: str, text: str) -> bool:
+        from identity_filter import page_corroborates_linkedin, text_declares_other_linkedin
 
-    found = bool(all_hits)
+        if text_declares_other_linkedin(f"{u}\n{text}", linkedin_url):
+            print(f"  [public_web] drop (other LinkedIn): {u}", flush=True)
+            return False
+        if not page_corroborates_linkedin(
+            url=u,
+            text=text,
+            canonical_linkedin=linkedin_url,
+            company=company,
+            university=university,
+        ):
+            print(f"  [public_web] drop (no LinkedIn corroboration): {u}", flush=True)
+            return False
+        return True
+
+    portfolios = []
+    for h in all_hits:
+        if not _looks_portfolio(h):
+            continue
+        u = h.get("url") or ""
+        text = f"{h.get('title') or ''} {h.get('text') or h.get('text_snippet') or h.get('snippet') or ''}"
+        if slug and not page_ok(u, text):
+            continue
+        portfolios.append(h)
+    blogs = []
+    for h in all_hits:
+        if not _looks_writing(h) or h in portfolios:
+            continue
+        u = h.get("url") or ""
+        text = f"{h.get('title') or ''} {h.get('text') or h.get('text_snippet') or h.get('snippet') or ''}"
+        if slug and not page_ok(u, text):
+            continue
+        blogs.append(h)
+    other = []
+    for h in all_hits:
+        if h in portfolios or h in blogs:
+            continue
+        u = h.get("url") or ""
+        text = f"{h.get('title') or ''} {h.get('text') or h.get('text_snippet') or h.get('snippet') or ''}"
+        if slug and not page_ok(u, text):
+            continue
+        other.append(h)
+
+    found = bool(portfolios or blogs or other)
     return {
         "status": "ok" if found else "not_found",
         "portfolios": portfolios[:8],
         "writing_and_talks": blogs[:8],
         "other_public_pages": other[:8],
-        "count": len(all_hits),
+        "count": len(portfolios) + len(blogs) + len(other),
         "canonical_linkedin_url": normalize_linkedin_url(linkedin_url),
+        "canonical_linkedin_slug": slug,
     }
 
 

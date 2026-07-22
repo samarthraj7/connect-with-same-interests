@@ -20,7 +20,8 @@ The Aggregated data includes a "query" object with the selected person's name / 
 - Treat query.linkedin_url as the CANONICAL identity when present.
 - Discard facts that clearly belong to a different person with the same name (different LinkedIn URL, incompatible employer timeline, conflicting education).
 - If gemini_search or exa_search disagree on linkedin_url, prefer query.linkedin_url and ignore conflicting source blobs.
-- Prefer apollo + aleads + linkedin_public + deep_agent.evidence + sources that agree with the canonical LinkedIn / company.
+- Prefer apollo + aleads + linkedin_public + deep_agent.evidence + nimble_pages.pages + sources that agree with the canonical LinkedIn / company.
+- When nimble_pages.status is "ok", treat pages[].markdown / pages[].text as high-value cited page body (each fact must still end with that page's url). Prefer pages from university directories and employer team/bio pages (mode=directed_org) for career, education, and senior colleagues.
 When deep_agent.evidence is present, treat those cited facts as high-priority inputs for summary / career / interests.
 
 ### SECTION 1: IDENTITY CROSS-CHECKING & CONFIDENCE
@@ -36,8 +37,8 @@ Before parsing career or public data, cross-reference identity markers across so
 Every factual sentence you write in summary, career_history items, interests, notable_points,
 notable_affiliations, awards_and_recognitions, public_presence.posts_about, and personal_info
 personal_notes MUST end with the source URL in parentheses, drawn from the JSON
-(gemini_search.sources[].url, exa_search.mentions[].url, public_web.*.url, apollo, linkedin_public.url,
-verified pages, personal_info.evidence, etc.).
+(gemini_search.sources[].url, exa_search.mentions[].url, public_web.*.url, nimble_pages.pages[].url,
+apollo, linkedin_public.url, verified pages, personal_info.evidence, etc.).
 
 Example format:
 "She is an SDE Intern at Sprintray working on agentic AI backends (https://www.linkedin.com/in/rheshavinod)."
@@ -133,6 +134,21 @@ def summarize_profile(merged_profile: dict) -> dict:
     sources = compact_sources_for_llm(merged_profile.get("sources") or {})
     query = merged_profile.get("query") or {}
     canonical = normalize_linkedin_url(query.get("linkedin_url"))
+
+    # Hard gate: strip same-name Peerlist/GitHub/posts that don't corroborate chosen LinkedIn
+    if canonical:
+        from identity_filter import filter_sources_against_linkedin
+
+        raw = merged_profile.get("sources") or sources
+        filtered = filter_sources_against_linkedin(
+            linkedin_url=canonical,
+            sources=raw if isinstance(raw, dict) else {},
+            company=query.get("company"),
+            university=query.get("university"),
+            name=query.get("name"),
+        )
+        sources = compact_sources_for_llm(filtered)
+
     # Drop Exa rediscovery noise if it somehow points elsewhere
     exa = sources.get("exa_search")
     if isinstance(exa, dict) and canonical and exa.get("linkedin_url"):
@@ -161,6 +177,13 @@ def summarize_profile(merged_profile: dict) -> dict:
     contents = (
         "Selected identity (HARD LOCK — do not mix other same-name people):\n"
         f"{json.dumps(identity, indent=2)}\n\n"
+        "RULES:\n"
+        "- The LinkedIn URL above is the ONLY person you may describe.\n"
+        "- Ignore Peerlist, GitHub, blogs, or posts that belong to a different LinkedIn slug "
+        "(e.g. mayureshchoudhary vs mayuresh-choudhary are DIFFERENT people).\n"
+        "- If sources conflict on school/employer/location, prefer Enrich Layer / LinkedIn-tied "
+        "sources and discard the rest.\n"
+        "- Never invent a blended career from two same-name people.\n\n"
         + (f"{corrections}\n\n" if corrections else "")
         + f"Aggregated data:\n{json.dumps({'query': identity, **sources}, indent=2)}"
     )
@@ -213,7 +236,27 @@ def _compact_value(value, depth: int):
         out = {}
         for k, v in value.items():
             # Drop bulky / low-value blobs
-            if k in {"raw", "raw_text", "apidirect_posts", "candidates", "search_history"}:
+            if k in {"raw", "raw_text", "apidirect_posts", "candidates", "search_history", "html"}:
+                continue
+            if k == "markdown" and isinstance(v, str) and len(v) > 3500:
+                out[k] = v[:3500] + "…"
+                continue
+            if k == "pages" and isinstance(v, list):
+                # Keep Nimble page bodies for synthesize (capped)
+                slim = []
+                for p in v[:10]:
+                    if not isinstance(p, dict):
+                        continue
+                    slim.append(
+                        {
+                            "url": p.get("final_url") or p.get("url"),
+                            "title": p.get("title"),
+                            "markdown": (p.get("markdown") or p.get("text") or "")[:3500],
+                            "status": p.get("status"),
+                            "extractor": p.get("extractor"),
+                        }
+                    )
+                out[k] = slim
                 continue
             if k == "evidence" and isinstance(v, list):
                 out[k] = _cap_list(v, 24)

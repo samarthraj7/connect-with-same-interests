@@ -1,4 +1,8 @@
-"""Instagram deep fetch: multi-candidate Google → ScrapeCreators → face match vs LinkedIn photo."""
+"""Instagram deep fetch: Google/name discover → name filter → ScrapeCreators → face match.
+
+Order matters: ScrapeCreators is only called for handles that already passed
+name verification (never SC name-search for discovery).
+"""
 
 from __future__ import annotations
 
@@ -25,6 +29,7 @@ def fetch_instagram(
     instagram_url: Optional[str] = None,
     candidate_urls: Optional[List[str]] = None,
     identity_hints: Optional[dict] = None,
+    search_constraints: Optional[dict] = None,
 ) -> dict:
     sc_key = os.environ.get("SCRAPECREATORS_API_KEY")
     if not sc_key:
@@ -33,18 +38,20 @@ def fetch_instagram(
     hints = identity_hints or {}
     ref_photo = (hints.get("photo_url") or hints.get("linkedin_photo_url") or "").strip()
 
+    # 1) Discover handles via Google + username guesses (no SC name search)
     discovery = find_profile_candidates(
         name,
         "instagram",
         company=company,
         known_url=instagram_url,
         max_candidates=10,
+        search_constraints=search_constraints,
     )
     # Merge any orchestrator-provided URLs
     extra = []
     for u in candidate_urls or []:
         if u:
-            extra.append({"url": u, "handle": None, "method": "seed_url"})
+            extra.append({"url": u, "handle": None, "method": "seed_url", "title": name})
     cands = list(discovery.get("candidates") or []) + extra
     # Dedupe by handle
     seen = set()
@@ -65,7 +72,7 @@ def fetch_instagram(
         # Legacy single-path fallback
         single = find_profile_link(name, "instagram", company=company, known_url=instagram_url)
         if single.get("status") == "ok" and single.get("handle"):
-            uniq = [{"handle": single["handle"], "url": single.get("url"), "method": single.get("method")}]
+            uniq = [{"handle": single["handle"], "url": single.get("url"), "method": single.get("method"), "title": name}]
             discovery = single
         else:
             return {
@@ -74,8 +81,16 @@ def fetch_instagram(
                 "reason": discovery.get("reason") or "no Instagram profile candidates",
             }
 
-    print(f"  [instagram] fetching profiles for {len(uniq[:MAX_FACE_CANDIDATES])} candidates…", flush=True)
+    # 2) Name verify again on SC side: only fetch profiles for name-plausible handles
+    print(
+        f"  [instagram] name-verified candidates → ScrapeCreators deep-fetch "
+        f"({len(uniq[:MAX_FACE_CANDIDATES])}): {[c.get('handle') for c in uniq[:MAX_FACE_CANDIDATES]]}",
+        flush=True,
+    )
     profiles = _fetch_profiles_parallel(sc_key, uniq[:MAX_FACE_CANDIDATES])
+
+    # Drop profiles whose SC full_name clearly mismatches the query name
+    profiles = [p for p in profiles if _sc_name_plausible(name, p)] or profiles
 
     face_result = None
     chosen = None
@@ -103,22 +118,27 @@ def fetch_instagram(
                     handle = accepted["handle"]
                     chosen = next((p for p in profiles if p["handle"].lower() == handle.lower()), None)
                     print(f"  [instagram] face exact match @{handle} score={accepted.get('score')}", flush=True)
-                elif (face_result or {}).get("best") and (face_result["best"].get("score") or 0) >= 55:
-                    # Probable — still try verify on best, but mark face probable
-                    handle = face_result["best"]["handle"]
-                    chosen = next((p for p in profiles if p["handle"].lower() == handle.lower()), None)
-                    print(
-                        f"  [instagram] face probable @{handle} score={face_result['best'].get('score')}",
-                        flush=True,
-                    )
+                # Do NOT pick a "probable" face (< accepted threshold) — that mixes identities
         except Exception as exc:
             face_result = {"status": "error", "error": str(exc)[:200]}
             print(f"  [instagram] face_match error: {exc}", flush=True)
 
-    if chosen is None:
+    # When LinkedIn photo lock exists, never fall back to first Google name hit
+    has_li_photo = bool(ref_photo)
+    if chosen is None and not has_li_photo:
         chosen = profiles[0] if profiles else None
+    elif chosen is None and has_li_photo:
+        print(
+            "  [instagram] no accepted face match vs LinkedIn photo — not attaching name-search IG",
+            flush=True,
+        )
 
     if not chosen:
+        reason = (
+            "no Instagram face match vs LinkedIn photo — refusing name-search fallback"
+            if has_li_photo
+            else "could not load Instagram profiles for candidates"
+        )
         return {
             "status": "not_found",
             "discovery": discovery,
@@ -126,7 +146,7 @@ def fetch_instagram(
             "candidates_checked": [
                 {"handle": p["handle"], "status": p.get("fetch_status")} for p in profiles
             ],
-            "reason": "could not load Instagram profiles for candidates",
+            "reason": reason,
         }
 
     handle = chosen["handle"]
@@ -171,13 +191,17 @@ def fetch_instagram(
     confidence = (verification or {}).get("confidence") or "low"
     is_match = (verification or {}).get("match") is True and confidence in ("high", "medium")
 
-    # Face exact upgrade
+    # Face exact upgrade — only when text verify is not a hard reject
     if face_result and face_result.get("accepted"):
-        is_match = True
-        if confidence == "low":
-            confidence = "high"
-        elif confidence not in ("high", "medium"):
-            confidence = "high"
+        if (verification or {}).get("match") is False and confidence == "low":
+            # Conflicting text identity + face: do not force match
+            print("  [instagram] face accepted but text verify rejected — keeping ambiguous", flush=True)
+        else:
+            is_match = True
+            if confidence == "low":
+                confidence = "medium"
+            elif confidence not in ("high", "medium"):
+                confidence = "medium"
 
     base = {
         "handle": handle,
@@ -242,6 +266,23 @@ def _public_face_match(face_result: Optional[dict]) -> Optional[dict]:
         "rankings": (face_result.get("rankings") or [])[:8],
         "error": face_result.get("error") or face_result.get("reason"),
     }
+
+
+def _sc_name_plausible(name: str, profile_row: dict) -> bool:
+    """After SC profile fetch, drop handles whose full_name clearly isn't the person."""
+    import re
+
+    full = ((profile_row.get("profile") or {}).get("full_name") or "").strip()
+    if not full:
+        return True  # no name on profile — keep for face match
+    tokens = [t.lower() for t in re.split(r"[^A-Za-z]+", name or "") if len(t) > 1]
+    if not tokens:
+        return True
+    fl = full.lower()
+    if tokens[0] in fl and (len(tokens) < 2 or tokens[-1] in fl):
+        return True
+    # At least first name must appear
+    return tokens[0] in fl
 
 
 def _fetch_profiles_parallel(api_key: str, candidates: List[dict]) -> List[dict]:

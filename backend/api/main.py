@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import copy
 import os
+import threading
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
@@ -78,6 +80,28 @@ class SignupBody(BaseModel):
     causes_and_affiliations: list[str] = []
     talking_goals: list[str] = []
     research_me: bool = True
+    # Pre-auth research draft from /public/research/start
+    draft_id: Optional[str] = None
+    # From POST /auth/signup/otp/verify
+    email_verified_token: Optional[str] = None
+
+
+class SignupOtpSendBody(BaseModel):
+    email: str
+
+
+class SignupOtpVerifyBody(BaseModel):
+    email: str
+    code: str
+
+
+class PublicResearchBody(BaseModel):
+    name: str
+    company: Optional[str] = None
+    university: Optional[str] = None
+    place: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    force_refresh: bool = True
 
 
 class ResearchFeedbackBody(BaseModel):
@@ -85,6 +109,17 @@ class ResearchFeedbackBody(BaseModel):
     rating: Literal["good", "bad"]
     wrong_notes: Optional[str] = None
     wrong_categories: Optional[list[str]] = None
+    # After Bad, immediately re-research using stored corrections (default on).
+    auto_retry: bool = True
+
+
+class PublicResearchFeedbackBody(BaseModel):
+    draft_id: str
+    rating: Literal["good", "bad"] = "bad"
+    wrong_notes: Optional[str] = None
+    wrong_categories: Optional[list[str]] = None
+    auto_retry: bool = True
+    force_refresh: bool = True
 
 
 class SelfResearchBody(BaseModel):
@@ -161,7 +196,22 @@ class VerifyHandlesBody(BaseModel):
     name: str
     company: Optional[str] = None
     university: Optional[str] = None
+    linkedin_url: Optional[str] = None
     handles: dict[str, str] = {}
+
+
+class IdentityResolveBody(BaseModel):
+    linkedin_url: str
+    github_username: Optional[str] = None
+    github_url: Optional[str] = None
+    name: Optional[str] = None
+    company: Optional[str] = None
+    location: Optional[str] = None
+    known_email: Optional[str] = None
+
+
+class IdentityQueueDecisionBody(BaseModel):
+    decision: Literal["confirm", "reject"]
 
 
 class ConnectionsUploadBody(BaseModel):
@@ -209,13 +259,42 @@ def signup(body: SignupBody):
     if users.find_by_email(body.email):
         raise HTTPException(400, "Email already registered")
 
+    from otp import consume_email_verified_token
+
     email = body.email.strip().lower()
+    require_otp = (os.environ.get("SIGNUP_REQUIRE_EMAIL_OTP") or "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if require_otp and not consume_email_verified_token(body.email_verified_token, email):
+        raise HTTPException(
+            400,
+            "Verify your email with the code we sent before creating an account.",
+        )
+
     name = body.name.strip()
     company = (body.company or "").strip() or None
     university = (body.university or "").strip() or None
     place = (body.place or body.location or "").strip() or None
     linkedin_url = (body.linkedin_url or "").strip() or None
-    if body.research_me and not (company or university or linkedin_url):
+
+    # Prefer pre-auth research draft when present — skip live research_me
+    draft = None
+    if body.draft_id:
+        from research_drafts import load_draft
+
+        draft = load_draft(body.draft_id)
+        if not draft:
+            raise HTTPException(400, "Research draft not found or expired — run Find Me again")
+        name = (draft.get("name") or name).strip()
+        company = (draft.get("company") or company or None)
+        university = (draft.get("university") or university or None)
+        place = (draft.get("place") or place or None)
+        linkedin_url = (draft.get("linkedin_url") or linkedin_url or None)
+
+    want_research = bool(body.research_me) and not draft
+    if want_research and not (company or university or linkedin_url):
         raise HTTPException(
             400,
             "Company, university, or LinkedIn URL required to research you.",
@@ -227,11 +306,12 @@ def signup(body: SignupBody):
     phone = (body.phone or "").strip()
     website = (body.website or "").strip()
 
+    current_company = (body.company or "").strip() or (company or "") or ""
     seed = {
         "name": name,
         "headline": body.headline.strip(),
         "location": (body.location or body.place or "").strip(),
-        "current_company": (body.company or "").strip(),
+        "current_company": current_company,
         "hobbies": _clean_list(body.hobbies),
         "interests": _clean_list(body.interests),
         "sports": _clean_list(body.sports),
@@ -274,8 +354,44 @@ def signup(body: SignupBody):
             },
         },
         "profile_source": "signup_seed",
-        "research_status": "pending" if body.research_me else "skipped",
+        "research_status": "pending" if want_research else ("ok" if draft else "skipped"),
     }
+
+    if draft and draft.get("summary"):
+        researched = profile_from_research(
+            name=name,
+            company=company,
+            summary=draft.get("summary") or {},
+            sources=draft.get("all_sources") or draft.get("sources") or {},
+            contact=seed["contact"],
+            linkedin_url=linkedin_url,
+        )
+        researched["researched_at"] = datetime.now(timezone.utc).isoformat()
+        researched["research_status"] = "ok"
+        researched["research_draft_id"] = body.draft_id
+        researched["profile_source"] = "claimed_public"
+        # User edits from signup form win over researched fields when provided
+        overlays = {
+            "headline": body.headline.strip() or None,
+            "hobbies": _clean_list(body.hobbies) or None,
+            "interests": _clean_list(body.interests) or None,
+            "sports": _clean_list(body.sports) or None,
+            "contact": seed["contact"],
+        }
+        seed = merge_manual_overlays(researched, {k: v for k, v in overlays.items() if v})
+        seed["contact"] = {
+            **(seed.get("contact") or {}),
+            **overlays["contact"],
+        }
+        if body.headline.strip():
+            seed["headline"] = body.headline.strip()
+        if _clean_list(body.hobbies):
+            seed["hobbies"] = _clean_list(body.hobbies)
+        if _clean_list(body.interests):
+            seed["interests"] = _clean_list(body.interests)
+        if _clean_list(body.sports):
+            seed["sports"] = _clean_list(body.sports)
+
 
     print(f"\n[signup] creating account for {email} ({name})")
     # Verify optional socials once — only when this request also researches YOU
@@ -299,6 +415,7 @@ def signup(body: SignupBody):
                 name=name,
                 company=company,
                 university=university,
+                linkedin_url=linkedin_url,
                 handles=handles_to_check,
             )
             handle_verification = vr.get("results") or {}
@@ -324,8 +441,19 @@ def signup(body: SignupBody):
     )
     print(f"[signup] saved user JSON → users/{user['id']}.json")
 
-    research_meta: dict[str, Any] = {"attempted": False}
-    if body.research_me:
+    research_meta: dict[str, Any] = {"attempted": False, "from_draft": bool(draft)}
+    if draft:
+        research_meta["attempted"] = True
+        research_meta["status"] = "ok"
+        research_meta["draft_id"] = body.draft_id
+        try:
+            from research_drafts import delete_draft
+
+            if body.draft_id:
+                delete_draft(body.draft_id)
+        except Exception:
+            pass
+    elif want_research:
         research_meta["attempted"] = True
         fetch_social = bool(instagram or twitter or facebook)
         print(
@@ -381,13 +509,17 @@ def signup(body: SignupBody):
     }
 
 
-@app.post("/me/research")
-def research_me(body: SelfResearchBody, user=Depends(require_user)):
-    """Re-run public research on the signed-in user. Defaults to draft until rated good."""
+def _run_self_research(
+    user: dict,
+    body: SelfResearchBody,
+    *,
+    on_progress: Optional[Any] = None,
+) -> dict[str, Any]:
+    """Shared self-research path used by sync POST /me/research and async jobs."""
     profile = user.get("profile") or {}
     name = profile.get("name") or ""
     if not name:
-        raise HTTPException(400, "Your profile needs a name before we can research you")
+        return {"status": "error", "error": "Your profile needs a name before we can research you"}
 
     company = (body.company or profile.get("current_company") or "").strip() or None
     university = (body.university or "").strip() or None
@@ -397,6 +529,12 @@ def research_me(body: SelfResearchBody, user=Depends(require_user)):
         or (profile.get("contact") or {}).get("linkedin_url")
         or ""
     ).strip() or None
+
+    if on_progress:
+        try:
+            on_progress("queued", 0.02, "Starting research…")
+        except Exception:
+            pass
 
     briefing = _fetch_person_briefing(
         name=name,
@@ -408,12 +546,11 @@ def research_me(body: SelfResearchBody, user=Depends(require_user)):
         force_refresh=body.force_refresh,
         persist=body.auto_commit,
         user_id=user["id"],
+        on_progress=on_progress,
     )
 
     if briefing.get("status") != "ok":
         err = briefing.get("error") or "Self-research failed"
-        # Keep UI honest: signup uses research_me=false, so status stays "skipped"
-        # unless we mark the failure here after /me/research.
         try:
             failed_profile = dict(user.get("profile") or {})
             failed_profile["research_status"] = "failed"
@@ -421,14 +558,14 @@ def research_me(body: SelfResearchBody, user=Depends(require_user)):
             users.replace_profile(user["id"], failed_profile)
         except Exception:
             pass
-        raise HTTPException(502, err)
+        return {"status": "error", "error": err}
 
     if briefing.get("needs_rating") and briefing.get("draft_id"):
         pending_profile = dict(user.get("profile") or {})
         pending_profile["research_status"] = "pending_rating"
         pending_profile["research_draft_id"] = briefing["draft_id"]
         user = users.replace_profile(user["id"], pending_profile)
-        return {
+        out = {
             "status": "ok",
             "needs_rating": True,
             "draft_id": briefing["draft_id"],
@@ -437,6 +574,12 @@ def research_me(body: SelfResearchBody, user=Depends(require_user)):
             "name": name,
             "company": company,
         }
+        if on_progress:
+            try:
+                on_progress("done", 1.0, "Research ready for your review")
+            except Exception:
+                pass
+        return out
 
     researched = profile_from_research(
         name=name,
@@ -464,7 +607,7 @@ def research_me(body: SelfResearchBody, user=Depends(require_user)):
                 __import__("json").dumps(rec, indent=2)
             )
 
-    return {
+    out = {
         "status": "ok",
         "needs_rating": False,
         "draft_id": None,
@@ -472,6 +615,117 @@ def research_me(body: SelfResearchBody, user=Depends(require_user)):
         "profile_slug": briefing.get("profile_slug"),
         "summary": _public_summary(briefing.get("summary") or {}),
         "visibility": {"public_dossier": True, "private_journal": True},
+        "name": name,
+        "company": company,
+    }
+    if on_progress:
+        try:
+            on_progress("done", 1.0, "Research complete")
+        except Exception:
+            pass
+    return out
+
+
+def _job_update(job_id: str, **fields: Any) -> None:
+    job = _jobs.get(job_id) or {}
+    job.update(fields)
+    job["updated_at"] = datetime.now(timezone.utc).isoformat()
+    _jobs[job_id] = job
+
+
+@app.post("/me/research")
+def research_me(body: SelfResearchBody, user=Depends(require_user)):
+    """Re-run public research on the signed-in user. Defaults to draft until rated good."""
+    result = _run_self_research(user, body)
+    if result.get("status") != "ok":
+        raise HTTPException(502, result.get("error") or "Self-research failed")
+    return result
+
+
+@app.post("/me/research/start")
+def research_me_start(body: SelfResearchBody, user=Depends(require_user)):
+    """Start self-research in the background; poll GET /me/research/jobs/{job_id}."""
+    profile = user.get("profile") or {}
+    if not (profile.get("name") or "").strip():
+        raise HTTPException(400, "Your profile needs a name before we can research you")
+
+    job_id = uuid.uuid4().hex
+    user_id = user["id"]
+    _job_update(
+        job_id,
+        status="running",
+        stage="queued",
+        progress=0.01,
+        message="Queued…",
+        user_id=user_id,
+        kind="self_research",
+        result=None,
+        error=None,
+    )
+
+    def worker() -> None:
+        def on_progress(stage: str, progress: float, message: str) -> None:
+            _job_update(
+                job_id,
+                status="running",
+                stage=stage,
+                progress=max(0.0, min(0.99, float(progress))),
+                message=message,
+            )
+
+        try:
+            fresh = users.get(user_id) or user
+            result = _run_self_research(fresh, body, on_progress=on_progress)
+            if result.get("status") != "ok":
+                _job_update(
+                    job_id,
+                    status="error",
+                    stage="error",
+                    progress=1.0,
+                    message=result.get("error") or "Self-research failed",
+                    error=result.get("error") or "Self-research failed",
+                    result=None,
+                )
+                return
+            _job_update(
+                job_id,
+                status="done",
+                stage="done",
+                progress=1.0,
+                message="Research ready for your review",
+                result=result,
+                error=None,
+            )
+        except Exception as exc:
+            _job_update(
+                job_id,
+                status="error",
+                stage="error",
+                progress=1.0,
+                message=str(exc)[:300],
+                error=str(exc)[:300],
+                result=None,
+            )
+
+    threading.Thread(target=worker, daemon=True).start()
+    return {"status": "ok", "job_id": job_id}
+
+
+@app.get("/me/research/jobs/{job_id}")
+def research_me_job(job_id: str, user=Depends(require_user)):
+    job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if job.get("user_id") and job["user_id"] != user["id"]:
+        raise HTTPException(403, "Not your research job")
+    return {
+        "status": job.get("status") or "unknown",
+        "stage": job.get("stage"),
+        "progress": job.get("progress") or 0,
+        "message": job.get("message") or "",
+        "error": job.get("error"),
+        "result": job.get("result"),
+        "updated_at": job.get("updated_at"),
     }
 
 
@@ -531,28 +785,61 @@ def get_research_draft(draft_id: str, user=Depends(require_user)):
 
 @app.post("/research/feedback")
 def research_feedback(body: ResearchFeedbackBody, user=Depends(require_user)):
-    """Rate a research draft. good → commit to people DB; bad → discard + store corrections."""
+    """Rate a research draft. good → commit; bad → store corrections and re-research by default."""
     from research_drafts import delete_draft, load_draft
     from research_feedback import record_feedback
     from people_lookup import public_dossier_from_record
 
     draft = load_draft(body.draft_id)
-    if not draft:
-        raise HTTPException(404, "Draft not found or expired — run research again")
-    if draft.get("user_id") and draft["user_id"] != user["id"]:
-        raise HTTPException(403, "Not your draft")
+    profile = user.get("profile") or {}
+    stale_draft = False
 
-    name = draft.get("name") or ""
-    company = draft.get("company")
-    university = draft.get("university")
-    linkedin_url = draft.get("linkedin_url")
-    summary = draft.get("summary") or {}
-    merged = draft.get("merged") or {}
-    overlap = draft.get("common_ground")
-    usage = draft.get("usage") or {}
-    all_sources = draft.get("all_sources") or draft.get("raw_results") or {}
+    # Stale draft IDs are common after claim/expiry — still allow Bad → re-research from profile.
+    if not draft:
+        if body.rating != "bad":
+            raise HTTPException(404, "Draft not found or expired — run research again")
+        name = (profile.get("name") or "").strip()
+        if not name:
+            raise HTTPException(404, "Draft not found or expired — run research again")
+        stale_draft = True
+        company = (profile.get("current_company") or "").strip() or None
+        university = None
+        linkedin_url = ((profile.get("contact") or {}).get("linkedin_url") or "").strip() or None
+        summary: dict[str, Any] = {}
+        merged: dict[str, Any] = {}
+        overlap = None
+        usage: dict[str, Any] = {"tier": "self"}
+        all_sources: dict[str, Any] = {}
+        is_self = True
+        draft = {
+            "name": name,
+            "company": company,
+            "linkedin_url": linkedin_url,
+            "kind": "self_research",
+            "tier": "self",
+            "user_id": user["id"],
+            "conversation": {"status": "skipped"},
+        }
+    else:
+        if draft.get("user_id") and draft["user_id"] != user["id"]:
+            raise HTTPException(403, "Not your draft")
+        name = draft.get("name") or ""
+        company = draft.get("company")
+        university = draft.get("university")
+        linkedin_url = draft.get("linkedin_url")
+        summary = draft.get("summary") or {}
+        merged = draft.get("merged") or {}
+        overlap = draft.get("common_ground")
+        usage = draft.get("usage") or {}
+        all_sources = draft.get("all_sources") or draft.get("raw_results") or {}
+        is_self = draft.get("kind") == "self_research" or draft.get("tier") == "self"
 
     if body.rating == "bad":
+        if not (body.wrong_notes or "").strip():
+            raise HTTPException(
+                400,
+                "Tell us what was wrong so the next research can fix it.",
+            )
         record_feedback(
             user_id=user["id"],
             rating="bad",
@@ -565,23 +852,80 @@ def research_feedback(body: ResearchFeedbackBody, user=Depends(require_user)):
             wrong_categories=body.wrong_categories,
             briefing_snapshot=_public_summary(summary) if isinstance(summary, dict) else None,
         )
-        delete_draft(body.draft_id)
-        # Self-research: clear pending draft markers on YOU profile
-        if draft.get("kind") == "self_research" or draft.get("tier") == "self":
-            failed_profile = dict(user.get("profile") or {})
-            failed_profile["research_status"] = "discarded"
+        try:
+            delete_draft(body.draft_id)
+        except Exception:
+            pass
+
+        if is_self:
+            failed_profile = dict(profile)
+            failed_profile["research_status"] = "retrying" if body.auto_retry else "discarded"
             failed_profile.pop("research_draft_id", None)
             failed_profile["research_error"] = (body.wrong_notes or "Rated bad")[:500]
             user = users.replace_profile(user["id"], failed_profile)
+
+            if body.auto_retry:
+                retry = _run_self_research(
+                    user,
+                    SelfResearchBody(
+                        company=company,
+                        university=university,
+                        linkedin_url=linkedin_url,
+                        force_refresh=True,
+                        auto_commit=False,
+                    ),
+                )
+                if retry.get("status") != "ok":
+                    return {
+                        "status": "ok",
+                        "rating": "bad",
+                        "committed": False,
+                        "retried": False,
+                        "message": (
+                            "Saved your notes, but re-research failed: "
+                            f"{retry.get('error') or 'unknown error'}"
+                        ),
+                        "user": _public_user(users.get(user["id"]) or user),
+                    }
+                return {
+                    "status": "ok",
+                    "rating": "bad",
+                    "committed": False,
+                    "retried": True,
+                    "needs_rating": True,
+                    "draft_id": retry.get("draft_id"),
+                    "summary": retry.get("summary"),
+                    "name": retry.get("name") or name,
+                    "company": retry.get("company") or company,
+                    "message": "Re-researched with your corrections — review the new draft.",
+                    "user": retry.get("user") or _public_user(users.get(user["id"]) or user),
+                }
+
+            return {
+                "status": "ok",
+                "rating": "bad",
+                "committed": False,
+                "retried": False,
+                "message": "Draft discarded. Corrections will guide the next research.",
+                "user": _public_user(user),
+            }
+
         return {
             "status": "ok",
             "rating": "bad",
             "committed": False,
-            "message": "Draft discarded. Corrections will guide the next research for this person.",
-            "user": _public_user(user),
+            "retried": False,
+            "retry": True,
+            "name": name,
+            "company": company,
+            "university": university,
+            "linkedin_url": linkedin_url,
+            "message": "Draft discarded. Re-researching with your corrections…",
         }
 
-    # good → commit
+    if stale_draft or not merged:
+        raise HTTPException(404, "Draft not found or expired — run research again")
+
     path = profiles.save(
         name,
         company,
@@ -596,7 +940,7 @@ def research_feedback(body: ResearchFeedbackBody, user=Depends(require_user)):
         rec["university"] = university
     if linkedin_url:
         contact = dict(rec.get("contact") or {})
-        contact["linkedin_url"] = linkedin_url  # always keep Find Me canonical
+        contact["linkedin_url"] = linkedin_url
         rec["contact"] = contact
     if draft.get("mutuals") is not None:
         rec["mutuals"] = draft.get("mutuals")
@@ -626,9 +970,7 @@ def research_feedback(body: ResearchFeedbackBody, user=Depends(require_user)):
         draft_id=body.draft_id,
     )
 
-    # Self-research drafts also claim + refresh YOU profile
-    if draft.get("kind") == "self_research" or draft.get("tier") == "self":
-        profile = user.get("profile") or {}
+    if is_self:
         researched = profile_from_research(
             name=name,
             company=company,
@@ -641,6 +983,7 @@ def research_feedback(body: ResearchFeedbackBody, user=Depends(require_user)):
         researched["research_status"] = "ok"
         researched["self_profile_slug"] = path.stem
         researched["profile_source"] = "claimed_public"
+        researched.pop("research_draft_id", None)
         merged_profile = merge_manual_overlays(researched, profile)
         user = users.replace_profile(user["id"], merged_profile)
         rec["claimed_user_id"] = user["id"]
@@ -712,6 +1055,34 @@ def update_settings(body: SettingsBody, user=Depends(require_user)):
     return _public_user(user)
 
 
+@app.post("/auth/signup/otp/send")
+def signup_otp_send(body: SignupOtpSendBody):
+    """Pre-auth: send email OTP before account creation."""
+    from otp import issue_signup_email_otp
+
+    email = (body.email or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(400, "Valid email required")
+    if users.find_by_email(email):
+        raise HTTPException(400, "Email already registered")
+    try:
+        return issue_signup_email_otp(email)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.post("/auth/signup/otp/verify")
+def signup_otp_verify(body: SignupOtpVerifyBody):
+    """Pre-auth: verify email OTP; returns email_verified_token for /auth/signup."""
+    from otp import verify_signup_email_otp
+
+    email = (body.email or "").strip().lower()
+    result = verify_signup_email_otp(email, body.code)
+    if result.get("status") != "ok":
+        raise HTTPException(400, result.get("error") or "OTP failed")
+    return result
+
+
 @app.post("/auth/otp/send")
 def otp_send(body: OtpSendBody, user=Depends(require_user)):
     from otp import issue_otp
@@ -744,6 +1115,52 @@ def otp_verify(body: OtpVerifyBody, user=Depends(require_user)):
     return {"ok": True, "user": _public_user(users.get(user["id"]))}
 
 
+@app.get("/public/stats")
+def public_stats():
+    """Landing-page stats (user count + review placeholders)."""
+    count = users.count()
+    return {
+        "user_count": count,
+        "user_count_display": f"{count:,}" if count else "0",
+        "reviews": [
+            {
+                "id": "placeholder-1",
+                "quote": "Walked into the meeting already knowing what we shared. Felt natural, not stalky.",
+                "name": "Alex M.",
+                "role": "Founder",
+                "placeholder": True,
+            },
+            {
+                "id": "placeholder-2",
+                "quote": "The LinkedIn lock alone saved me from briefing the wrong person twice.",
+                "name": "Priya S.",
+                "role": "BD lead",
+                "placeholder": True,
+            },
+            {
+                "id": "placeholder-3",
+                "quote": "Common ground tips that actually matched — not generic icebreakers.",
+                "name": "Jordan L.",
+                "role": "Investor",
+                "placeholder": True,
+            },
+        ],
+        "icp": {
+            "headline": "Built for people who meet for a living",
+            "body": (
+                "Founders, operators, investors, and sales leaders who prep before "
+                "intros — and refuse to mix up same-name strangers."
+            ),
+            "segments": [
+                "Founders & operators",
+                "Investors & advisors",
+                "BD / partnerships",
+                "Recruiters & talent",
+            ],
+        },
+    }
+
+
 @app.post("/verify/handles")
 def verify_handles_endpoint(body: VerifyHandlesBody):
     """Pre-account handle verification for signup — call once; cache results client-side."""
@@ -753,8 +1170,46 @@ def verify_handles_endpoint(body: VerifyHandlesBody):
         name=body.name.strip(),
         company=(body.company or "").strip() or None,
         university=(body.university or "").strip() or None,
+        linkedin_url=(body.linkedin_url or "").strip() or None,
         handles={k: v for k, v in (body.handles or {}).items() if v},
     )
+
+
+@app.post("/identity/resolve")
+def identity_resolve_endpoint(body: IdentityResolveBody, user=Depends(require_user)):
+    """Score LinkedIn ↔ GitHub without auto-merging. Returns score/tier/evidence only."""
+    from identity_resolve import public_resolution, resolve_linkedin_github
+
+    if not (body.github_username or body.github_url):
+        raise HTTPException(400, "github_username or github_url required")
+    result = resolve_linkedin_github(
+        linkedin_url=body.linkedin_url.strip(),
+        github_username=(body.github_username or "").strip() or None,
+        github_url=(body.github_url or "").strip() or None,
+        name=(body.name or "").strip() or None,
+        company=(body.company or "").strip() or None,
+        location=(body.location or "").strip() or None,
+        known_email=(body.known_email or "").strip() or None,
+    )
+    return {"status": "ok", "match": public_resolution(result), "meta": result.get("_meta")}
+
+
+@app.get("/identity/queue")
+def identity_queue_list(user=Depends(require_user)):
+    """Human-in-the-loop queue for possible (unconfirmed) identity matches."""
+    from identity_resolve import list_possible_queue
+
+    return {"status": "ok", "queue": list_possible_queue()}
+
+
+@app.post("/identity/queue/{item_id}")
+def identity_queue_decide(item_id: str, body: IdentityQueueDecisionBody, user=Depends(require_user)):
+    from identity_resolve import resolve_queue_item
+
+    rec = resolve_queue_item(item_id, body.decision)
+    if not rec:
+        raise HTTPException(404, "Queue item not found")
+    return {"status": "ok", "item": rec}
 
 
 @app.post("/me/connections")
@@ -876,6 +1331,189 @@ def public_candidates(body: CandidatesBody):
     return _candidates_impl(body)
 
 
+@app.post("/public/research/start")
+def public_research_start(body: PublicResearchBody):
+    """Pre-auth research for signup. Poll GET /public/research/jobs/{job_id}."""
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(400, "Name required")
+    company = (body.company or "").strip() or None
+    university = (body.university or "").strip() or None
+    place = (body.place or "").strip() or None
+    linkedin_url = (body.linkedin_url or "").strip() or None
+    if not (company or university or linkedin_url):
+        raise HTTPException(
+            400,
+            "Pick a match (or add company, university, or LinkedIn) before researching.",
+        )
+
+    job_id = uuid.uuid4().hex
+    _job_update(
+        job_id,
+        status="running",
+        stage="queued",
+        progress=0.01,
+        message="Queued…",
+        kind="public_signup",
+        result=None,
+        error=None,
+    )
+
+    def worker() -> None:
+        def on_progress(stage: str, progress: float, message: str) -> None:
+            _job_update(
+                job_id,
+                status="running",
+                stage=stage,
+                progress=max(0.0, min(0.99, float(progress))),
+                message=message,
+            )
+
+        try:
+            on_progress("queued", 0.02, "Starting research…")
+            briefing = _fetch_person_briefing(
+                name=name,
+                company=company,
+                university=university,
+                place=place,
+                linkedin_url=linkedin_url,
+                fetch_social=True,
+                force_refresh=body.force_refresh,
+                persist=False,
+                user_id=None,
+                on_progress=on_progress,
+            )
+            if briefing.get("status") != "ok":
+                err = briefing.get("error") or "Research failed"
+                _job_update(
+                    job_id,
+                    status="error",
+                    stage="error",
+                    progress=1.0,
+                    message=err,
+                    error=err,
+                    result=None,
+                )
+                return
+            result = {
+                "status": "ok",
+                "draft_id": briefing.get("draft_id"),
+                "needs_rating": True,
+                "name": name,
+                "company": company,
+                "university": university,
+                "place": place,
+                "linkedin_url": linkedin_url,
+                "summary": _public_summary(briefing.get("summary") or {}),
+            }
+            _job_update(
+                job_id,
+                status="done",
+                stage="done",
+                progress=1.0,
+                message="Research ready for your review",
+                result=result,
+                error=None,
+            )
+        except Exception as exc:
+            _job_update(
+                job_id,
+                status="error",
+                stage="error",
+                progress=1.0,
+                message=str(exc)[:300],
+                error=str(exc)[:300],
+                result=None,
+            )
+
+    threading.Thread(target=worker, daemon=True).start()
+    return {"status": "ok", "job_id": job_id}
+
+
+@app.get("/public/research/jobs/{job_id}")
+def public_research_job(job_id: str):
+    job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if job.get("kind") != "public_signup":
+        raise HTTPException(403, "Not a public research job")
+    return {
+        "status": job.get("status") or "unknown",
+        "stage": job.get("stage"),
+        "progress": job.get("progress") or 0,
+        "message": job.get("message") or "",
+        "error": job.get("error"),
+        "result": job.get("result"),
+        "updated_at": job.get("updated_at"),
+    }
+
+
+@app.post("/public/research/feedback")
+def public_research_feedback(body: PublicResearchFeedbackBody):
+    """Pre-auth Bad rating: store corrections and optionally start a corrected research job."""
+    from research_drafts import delete_draft, load_draft
+    from research_feedback import record_feedback
+
+    draft = load_draft(body.draft_id)
+    if not draft:
+        raise HTTPException(404, "Draft not found or expired — research again")
+    if draft.get("user_id"):
+        raise HTTPException(403, "Use authenticated /research/feedback for this draft")
+    if body.rating != "bad":
+        raise HTTPException(400, "Public feedback only supports Bad — create an account to save Good")
+    if not (body.wrong_notes or "").strip():
+        raise HTTPException(400, "Tell us what was wrong so the next research can fix it.")
+
+    name = (draft.get("name") or "").strip()
+    company = draft.get("company")
+    university = draft.get("university")
+    place = draft.get("place")
+    linkedin_url = draft.get("linkedin_url")
+    record_feedback(
+        user_id=None,
+        rating="bad",
+        name=name,
+        company=company,
+        university=university,
+        linkedin_url=linkedin_url,
+        draft_id=body.draft_id,
+        wrong_notes=body.wrong_notes,
+        wrong_categories=body.wrong_categories or ["signup_self_research"],
+        briefing_snapshot=_public_summary(draft.get("summary") or {}),
+    )
+    try:
+        delete_draft(body.draft_id)
+    except Exception:
+        pass
+
+    if not body.auto_retry:
+        return {
+            "status": "ok",
+            "rating": "bad",
+            "retried": False,
+            "message": "Notes saved. Tap research again when ready.",
+        }
+
+    # Kick off corrected research as a public job
+    started = public_research_start(
+        PublicResearchBody(
+            name=name,
+            company=company,
+            university=university,
+            place=place,
+            linkedin_url=linkedin_url,
+            force_refresh=body.force_refresh,
+        )
+    )
+    return {
+        "status": "ok",
+        "rating": "bad",
+        "retried": True,
+        "job_id": started.get("job_id"),
+        "message": "Re-researching with your corrections…",
+    }
+
+
 def _candidates_impl(body: CandidatesBody):
     from connectors import gemini_search
 
@@ -891,7 +1529,12 @@ def _candidates_impl(body: CandidatesBody):
         print("[/public/candidates] REJECT empty name", flush=True)
         raise HTTPException(400, "Name required")
 
-    result = gemini_search.find_candidates(name)
+    result = gemini_search.find_candidates(
+        name,
+        company=(body.company or "").strip() or None,
+        university=(body.university or "").strip() or None,
+        linkedin_url=(body.linkedin_url or "").strip() or None,
+    )
     status = result.get("status")
     err = result.get("error") or result.get("reason")
     print(f"[/public/candidates] gemini status={status!r} error={err!r}", flush=True)
@@ -907,28 +1550,38 @@ def _candidates_impl(body: CandidatesBody):
         return {"candidates": [], "status": status or "not_found", "error": err}
 
     def _apply_filters(rows: list) -> list:
+        from connectors.exa_search import _candidate_matches_org, _org_aliases
+
         out_rows = list(rows or [])
-        company = (body.company or "").strip().lower()
-        university = (body.university or "").strip().lower()
+        company = (body.company or "").strip() or None
+        university = (body.university or "").strip() or None
         linkedin = (body.linkedin_url or "").strip().lower()
-        if company:
+        if company or university:
             filtered = [
                 c
                 for c in out_rows
-                if company in (c.get("company") or "").lower()
-                or company in (c.get("context") or "").lower()
+                if _candidate_matches_org(c, company=company, university=university)
             ]
-            out_rows = filtered or out_rows
-        if university:
-            filtered = [
-                c
-                for c in out_rows
-                if university in (c.get("context") or "").lower()
-                or university in (c.get("location") or "").lower()
-                or university in (c.get("company") or "").lower()
-            ]
+            # Prefer org matches; only fall back to full list if discovery found none
             if filtered:
                 out_rows = filtered
+            else:
+                # Also try loose alias substring on context (USC vs full name)
+                aliases = _org_aliases(university) + _org_aliases(company)
+                loose = []
+                for c in out_rows:
+                    blob = " ".join(
+                        [
+                            str(c.get("company") or ""),
+                            str(c.get("context") or ""),
+                            str(c.get("role") or ""),
+                            str(c.get("location") or ""),
+                        ]
+                    ).lower()
+                    if any(a.lower() in blob for a in aliases if a):
+                        loose.append(c)
+                if loose:
+                    out_rows = loose
         if linkedin:
             filtered = [
                 c
@@ -1277,6 +1930,7 @@ def health():
         "enrichlayer_configured": bool(
             (os.environ.get("ENRICHLAYER_API_KEY") or os.environ.get("ENRICH_LAYER_API_KEY") or "").strip()
         ),
+        "nimble_configured": bool((os.environ.get("NIMBLE_API_KEY") or "").strip()),
         "supabase_configured": supabase_enabled(),
         "calendar_configured": calendar_configured(),
     }
@@ -1300,11 +1954,20 @@ def _fetch_person_briefing(
     facebook_url: Optional[str] = None,
     persist: bool = True,
     user_id: Optional[str] = None,
+    on_progress: Optional[Any] = None,
 ) -> dict[str, Any]:
     """Research + summarize a person (no conversation / no token charge).
 
     When persist=False, stages a draft for good/bad rating instead of writing people DB.
     """
+    def _prog(stage: str, progress: float, message: str) -> None:
+        if not on_progress:
+            return
+        try:
+            on_progress(stage, progress, message)
+        except Exception:
+            pass
+
     ttl_hours = float(os.environ.get("CACHE_TTL_HOURS", "24"))
     if force_refresh:
         fresh: set = set()
@@ -1316,6 +1979,17 @@ def _fetch_person_briefing(
         skip |= set(SOCIAL_SOURCES)
 
     existing = profiles.load(name, company)
+    try:
+        from research_feedback import merged_search_constraints
+
+        search_constraints = merged_search_constraints(
+            name=name, company=company, linkedin_url=linkedin_url
+        ) or None
+    except Exception:
+        search_constraints = None
+    if search_constraints:
+        print(f"  [research] applying feedback search constraints: {list(search_constraints.keys())}", flush=True)
+
     raw_results = orchestrator.run(
         PersonQuery(
             name=name,
@@ -1324,10 +1998,11 @@ def _fetch_person_briefing(
             place=place,
             linkedin_url=linkedin_url,
             github_username=github_username,
+            search_constraints=search_constraints,
         ),
         skip=frozenset(skip),
+        on_progress=on_progress,
     )
-
 
     # If signup provided exact social handles, deep-fetch those directly.
     if instagram_handle and "instagram_public" not in skip:
@@ -1364,6 +2039,18 @@ def _fetch_person_briefing(
             facebook_url=facebook_url,
         )
 
+    # Chosen LinkedIn is source of truth — strip Peerlist/GitHub/posts from other same-name people
+    if linkedin_url:
+        from identity_filter import filter_sources_against_linkedin
+
+        raw_results = filter_sources_against_linkedin(
+            linkedin_url=linkedin_url,
+            sources=raw_results,
+            company=company,
+            university=university,
+            name=name,
+        )
+
     merged = merge_profile(
         query={
             "name": name,
@@ -1379,9 +2066,11 @@ def _fetch_person_briefing(
     has_new_data = any(r.get("status") == "ok" for r in raw_results.values())
     if not has_new_data and existing and existing.get("latest_summary"):
         summary = existing["latest_summary"]
+        _prog("synthesize", 0.92, "Using cached briefing")
     else:
         from research_feedback import corrections_prompt_block, mark_applied, prior_bad_corrections
 
+        _prog("synthesize", 0.88, "Building your public briefing…")
         cached_sources = (existing or {}).get("latest_sources", {})
         llm_view = copy.deepcopy(merged)
         llm_view["sources"] = {**cached_sources, **raw_results}
@@ -1402,6 +2091,7 @@ def _fetch_person_briefing(
                 }
         elif prior:
             mark_applied([p["id"] for p in prior if p.get("id")])
+        _prog("synthesize", 0.95, "Briefing ready")
 
     cached_sources = (existing or {}).get("latest_sources", {})
     all_sources = {**cached_sources, **raw_results}
@@ -1520,6 +2210,15 @@ def _run_research(body: ResearchBody, user: dict) -> dict:
         if not body.fetch_social:
             skip |= set(SOCIAL_SOURCES)
 
+        try:
+            from research_feedback import merged_search_constraints
+
+            search_constraints = merged_search_constraints(
+                name=name, company=company, linkedin_url=linkedin_url
+            ) or None
+        except Exception:
+            search_constraints = None
+
         raw_results = orchestrator.run(
             PersonQuery(
                 name=name,
@@ -1527,9 +2226,21 @@ def _run_research(body: ResearchBody, user: dict) -> dict:
                 university=university,
                 place=body.place,
                 linkedin_url=linkedin_url,
+                search_constraints=search_constraints,
             ),
             skip=frozenset(skip),
         )
+
+        if linkedin_url:
+            from identity_filter import filter_sources_against_linkedin
+
+            raw_results = filter_sources_against_linkedin(
+                linkedin_url=linkedin_url,
+                sources=raw_results,
+                company=company,
+                university=university,
+                name=name,
+            )
 
         merged = merge_profile(
             query={

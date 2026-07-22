@@ -1,6 +1,8 @@
+import * as Linking from "expo-linking";
 import React, { useState } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { ResearchBriefingPreview } from "../../components/ResearchBriefingPreview";
 import { ScreenBackdrop } from "../../components/ScreenBackdrop";
 import { Body, Bullet, Button, ChipInput, Field, SectionTitle, UrlLink } from "../../components/ui";
 import { api } from "../../lib/api";
@@ -235,25 +237,39 @@ export default function ProfileScreen() {
 
   const rateDraft = async (rating: "good" | "bad") => {
     if (!draftId) return;
+    if (rating === "bad" && !ratingNotes.trim()) {
+      setMsg("Tell us what was wrong so re-research can fix it.");
+      return;
+    }
     setRatingBusy(true);
-    setMsg("");
+    setMsg(rating === "bad" ? "Saving notes and re-researching…" : "");
     try {
       const res = await api.researchFeedback({
         draft_id: draftId,
         rating,
         wrong_notes: rating === "bad" ? ratingNotes.trim() || undefined : undefined,
         wrong_categories: rating === "bad" ? ["self_research"] : undefined,
+        auto_retry: rating === "bad",
       });
+      setRatingNotes("");
+      await refresh();
+      if (rating === "bad") {
+        if (res.retried && res.draft_id) {
+          ingestDraftPreview(res.summary, res.draft_id);
+          setMsg(res.message || "New draft ready — review and rate again.");
+          return;
+        }
+        setDraftId(null);
+        setDraftSummary("");
+        setDraftHighlights([]);
+        setDraftBriefing(null);
+        setMsg(res.message || "Draft discarded. Re-research when you want to try again.");
+        return;
+      }
       setDraftId(null);
       setDraftSummary("");
       setDraftHighlights([]);
       setDraftBriefing(null);
-      setRatingNotes("");
-      await refresh();
-      if (rating === "bad") {
-        setMsg(res.message || "Draft discarded. Re-research when you want to try again.");
-        return;
-      }
       const p = res.user?.profile || {};
       setHeadline(p.headline || headline);
       setLocation(p.location || location);
@@ -285,13 +301,77 @@ export default function ProfileScreen() {
     }
   };
 
+  const linkCalendar = async () => {
+    setCalendarBusy(true);
+    setMsg("");
+    try {
+      const redirectUri =
+        Platform.OS === "web" && typeof window !== "undefined"
+          ? `${window.location.origin}/calendar-oauth`
+          : Linking.createURL("calendar-oauth");
+      const res = await api.calendarOAuthUrl(redirectUri);
+      if (res.status === "skipped" || !res.url) {
+        setMsg(
+          res.reason ||
+            "Google Calendar isn’t configured on the server yet. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to backend/.env, then restart the API.",
+        );
+        return;
+      }
+      const canOpen = await Linking.canOpenURL(res.url);
+      if (!canOpen) {
+        setMsg("Could not open Google sign-in in this environment.");
+        return;
+      }
+      await Linking.openURL(res.url);
+      setMsg(
+        "Complete Google sign-in in the browser. After you approve access, return here and tap Sync upcoming meetings. (Register this redirect URI in Google Cloud: " +
+          redirectUri +
+          ")",
+      );
+    } catch (e: any) {
+      setMsg(e.message || "Could not start Google Calendar link");
+    } finally {
+      setCalendarBusy(false);
+    }
+  };
+
+  // Capture OAuth redirect on web/deep link when ?code= is present
+  React.useEffect(() => {
+    const handleUrl = async (url: string) => {
+      try {
+        const parsed = Linking.parse(url);
+        const code = (parsed.queryParams?.code as string) || "";
+        if (!code) return;
+        const redirectUri =
+          Platform.OS === "web" && typeof window !== "undefined"
+            ? `${window.location.origin}/calendar-oauth`
+            : Linking.createURL("calendar-oauth");
+        setCalendarBusy(true);
+        await api.calendarOAuth({ code, redirect_uri: redirectUri });
+        setMsg("Google Calendar linked. Tap Sync upcoming meetings.");
+        await refresh();
+      } catch (e: any) {
+        setMsg(e.message || "Calendar OAuth failed");
+      } finally {
+        setCalendarBusy(false);
+      }
+    };
+    const sub = Linking.addEventListener("url", ({ url }) => {
+      handleUrl(url);
+    });
+    Linking.getInitialURL().then((url) => {
+      if (url) handleUrl(url);
+    });
+    return () => sub.remove();
+  }, [refresh]);
+
   const syncCalendar = async () => {
     setCalendarBusy(true);
     setMsg("");
     try {
       const res = await api.calendarSyncPrep();
       if (res.status === "skipped") {
-        setMsg(res.reason || "Link Google Calendar first (needs GOOGLE_CLIENT_ID).");
+        setMsg(res.reason || "Link Google Calendar first.");
       } else {
         setMsg(`Calendar prep: added ${res.added ?? 0} attendees to queue.`);
       }
@@ -350,17 +430,23 @@ export default function ProfileScreen() {
               }}
             >
               <Text style={{ fontFamily: fonts.bodySemi, color: colors.ember }}>
-                Rate this research before it saves to your profile
+                Review the full research before saving
               </Text>
-              {draftSummary ? <Body>{draftSummary}</Body> : null}
+              <ResearchBriefingPreview
+                summary={draftBriefing}
+                name={profile.name}
+                company={profile.current_company}
+                linkedinUrl={linkedin}
+              />
               {draftHighlights.map((c) => (
                 <Bullet key={c}>{c}</Bullet>
               ))}
               <Field
-                label="What was wrong? (if Bad)"
+                label="What was wrong? (required for Fix & re-research)"
                 value={ratingNotes}
                 onChangeText={setRatingNotes}
                 multiline
+                placeholder="Wrong person, wrong company, outdated role…"
               />
               <View style={{ flexDirection: "row", gap: 10 }}>
                 <View style={{ flex: 1 }}>
@@ -368,7 +454,7 @@ export default function ProfileScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Button
-                    title="Bad — discard"
+                    title="Bad — fix & re-research"
                     variant="ghost"
                     onPress={() => rateDraft("bad")}
                     loading={ratingBusy}
@@ -511,8 +597,16 @@ export default function ProfileScreen() {
           />
           <SectionTitle>Calendar auto-prep</SectionTitle>
           <Body>
-            Link Google Calendar (server keys required) to queue research for upcoming attendees.
+            Link Google Calendar to queue research for upcoming meeting attendees. Requires GOOGLE_CLIENT_ID /
+            GOOGLE_CLIENT_SECRET on the API.
           </Body>
+          <Button
+            title="Link Google Calendar"
+            variant="ember"
+            onPress={linkCalendar}
+            loading={calendarBusy}
+            style={{ marginTop: 10 }}
+          />
           <Button
             title="Sync upcoming meetings"
             variant="ghost"
