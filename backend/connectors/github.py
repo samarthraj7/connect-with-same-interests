@@ -150,6 +150,7 @@ def _attach_identity_resolution(
     company: Optional[str],
     linkedin_url: str,
     user_supplied_username: bool = False,
+    sources: Optional[dict] = None,
 ) -> dict:
     from identity_resolve import TIER_CONFIRMED, public_resolution, resolve_linkedin_github
 
@@ -159,7 +160,10 @@ def _attach_identity_resolution(
         github_username=profile.get("login") or result.get("username"),
         name=name,
         company=company,
+        sources=sources,
+        github_identity=None,
     )
+    # Pass avatar into identity via github_identity rebuild if needed — sources carry LI photo
     result["identity_match"] = public_resolution(resolution)
     result["username_user_supplied"] = user_supplied_username
     if resolution.get("tier") == TIER_CONFIRMED:

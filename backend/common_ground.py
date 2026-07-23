@@ -42,12 +42,15 @@ interesting, engaging things to talk about. The end user should never see
 - Do not write openers that announce "we have so much in common" or expose the
   matching machinery. Write natural things YOU could actually say.
 
-### PRIORITIZE LIVED INTERESTS
+### PRIORITIZE LIVED INTERESTS & DEEP BRIDGES
 - Actively mine YOU.hobbies, YOU.sports, YOU.interests AND THEM.personal_info.hobbies /
   sports_interests / interests / public writing for conversation fuel.
+- Prefer place, hometown, family background, shared university, shared company, and
+  children's schools (only when BOTH sides evidence them) over LinkedIn headline restatements.
 - Prefer a specific shared hobby/sport/interest over a generic job-title bridge when both exist.
-- Portfolios, personal sites, talks, and writing on THEM (see THEM.portfolios /
-  THEM.public_presence) are fair game for non-obvious topics — not LinkedIn headlines restated.
+- Portfolios, personal sites, talks, papers, and writing on THEM are fair game.
+- When THEM.research_collaborators or THEM.senior_connections overlap with YOU's collaborators /
+  network (named people on both sides), create talk_about + openers about that shared person.
 - If THEM.user_supplied_facts includes private_journal_snippets / private_hobbies, treat them as
   real THEM-side evidence for bridges — but never quote or reveal that these came from a private journal
   in openers (write natural conversation, not "I read your private blog").
@@ -339,10 +342,28 @@ def _them_brief(
                 "sports_interests",
                 "weekend_preferences",
                 "family_background",
+                "spouse",
+                "children",
+                "siblings",
+                "estimated_age_band",
+                "estimated_age_basis",
                 "personal_notes",
             )
             if personal.get(k)
         },
+        "family": summary.get("family")
+        or {
+            "spouse": personal.get("spouse"),
+            "children": personal.get("children") or [],
+            "siblings": personal.get("siblings") or [],
+            "notes": personal.get("family_background") or [],
+        },
+        "relative_profiles": (sources or {}).get("personal_info", {}).get("relative_profiles")
+        if isinstance((sources or {}).get("personal_info"), dict)
+        else [],
+        "research_collaborators": summary.get("research_collaborators") or [],
+        "senior_connections": summary.get("senior_connections") or [],
+        "estimated_age_band": summary.get("estimated_age_band") or personal.get("estimated_age_band"),
     }
     gemini = (sources or {}).get("gemini_search") or {}
     if isinstance(gemini, dict):
@@ -352,6 +373,20 @@ def _them_brief(
             brief["current_role"] = gemini["current_role"]
         if gemini.get("current_company"):
             brief["current_company"] = gemini["current_company"]
+        if gemini.get("notable_colleagues") and not brief.get("research_collaborators"):
+            brief["research_collaborators"] = gemini["notable_colleagues"]
+        if gemini.get("senior_colleagues") and not brief.get("senior_connections"):
+            brief["senior_connections"] = gemini["senior_colleagues"]
+    deep = (sources or {}).get("deep_agent") or {}
+    if isinstance(deep, dict) and deep.get("evidence"):
+        brief["deep_evidence"] = (deep.get("evidence") or [])[:12]
+    pages = (sources or {}).get("nimble_pages") or (sources or {}).get("page_extracts") or {}
+    if isinstance(pages, dict) and pages.get("pages"):
+        brief["page_extracts"] = [
+            {"url": p.get("final_url") or p.get("url"), "title": p.get("title")}
+            for p in (pages.get("pages") or [])[:6]
+            if isinstance(p, dict)
+        ]
     # Fold user-supplied and research hobbies/sports onto top-level for the model
     hobbies = list(personal.get("hobbies") or [])
     sports = list(personal.get("sports_interests") or personal.get("sports") or [])

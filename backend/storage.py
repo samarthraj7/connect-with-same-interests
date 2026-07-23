@@ -129,6 +129,9 @@ class ProfileStore:
         existing["source_fetched_at"] = fetched_at_map
 
         existing["latest_summary"] = summary
+        if merged_profile.get("knowledge_graph") is not None:
+            existing["latest_knowledge_graph"] = merged_profile["knowledge_graph"]
+            existing["latest_conflicts"] = merged_profile.get("conflicts") or []
         if common_ground is not None:
             existing["latest_common_ground"] = common_ground
         if usage is not None:

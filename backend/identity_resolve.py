@@ -23,13 +23,14 @@ from identity_lock import normalize_linkedin_url, same_linkedin, linkedin_slug
 WEIGHTS = {
     "self_declared_link": 0.5,  # Direct
     "personal_website_both": 0.3,  # Direct
+    "avatar_face_match": 0.55,  # Direct — LinkedIn/research photo vs GitHub avatar
     "employer_match": 0.15,  # Inferred
     "location_match": 0.05,  # Inferred
     "username_email_overlap": 0.15,  # Inferred
     "bio_niche_overlap": 0.05,  # Weak inferred
 }
 
-DIRECT_SIGNALS = frozenset({"self_declared_link", "personal_website_both"})
+DIRECT_SIGNALS = frozenset({"self_declared_link", "personal_website_both", "avatar_face_match"})
 
 TIER_CONFIRMED = "confirmed"
 TIER_POSSIBLE = "possible"
@@ -81,6 +82,7 @@ def fetch_linkedin_identity(
                 out["headline"] = out["headline"] or pub.get("headline")
                 out["about"] = out["about"] or pub.get("about")
                 out["featured_titles"] = pub.get("featured_titles") or []
+                out["photo_url"] = pub.get("photo_url") or pub.get("profile_pic_url")
         except Exception as exc:
             out["linkedin_public_error"] = str(exc)[:200]
 
@@ -90,6 +92,7 @@ def fetch_linkedin_identity(
         out["name"] = out["name"] or gemini.get("name")
         out["company"] = out["company"] or gemini.get("current_company")
         out["headline"] = out["headline"] or gemini.get("current_role")
+        out["photo_url"] = out.get("photo_url") or gemini.get("photo_url")
         links = gemini.get("social_profile_links") or {}
         if isinstance(links, dict):
             if links.get("github"):
@@ -194,11 +197,66 @@ def fetch_github_identity(
         "organizations": orgs,
         "repos": repo_list,
         "linkedin_urls": linkedin_urls,
+        "avatar_url": prof.get("avatar_url"),
         "raw_links": _uniq([blog] + linkedin_urls + [url] if blog else linkedin_urls + [url]),
     }
 
 
 # ── 2) Signal extractor ─────────────────────────────────────────────────────
+
+
+def _avatar_face_signal(
+    linkedin: dict[str, Any],
+    github: dict[str, Any],
+    *,
+    sources: Optional[dict] = None,
+) -> Optional[dict[str, Any]]:
+    """Direct signal when LinkedIn/research photo and GitHub avatar are the same face."""
+    ref = (linkedin.get("photo_url") or "").strip()
+    sources = sources or {}
+    if not ref:
+        for key in ("apollo", "enrichlayer", "linkedin_public", "gemini_search"):
+            block = sources.get(key)
+            if isinstance(block, dict):
+                ref = (
+                    block.get("photo_url")
+                    or block.get("profile_pic_url")
+                    or (block.get("profile") or {}).get("profile_pic_url")
+                    or ""
+                ).strip()
+                if ref:
+                    break
+    avatar = (github.get("avatar_url") or "").strip()
+    if not ref or not avatar or "ui-avatars.com" in ref:
+        return None
+    try:
+        from face_match import compare_faces
+
+        result = compare_faces(
+            ref,
+            [
+                {
+                    "handle": github.get("login") or "github",
+                    "full_name": github.get("name"),
+                    "photo_url": avatar,
+                    "profile_url": github.get("url"),
+                }
+            ],
+            person_name=linkedin.get("name"),
+        )
+        accepted = (result or {}).get("accepted")
+        if accepted and int(accepted.get("score") or 0) >= 85:
+            return {
+                "signal": "avatar_face_match",
+                "kind": "direct",
+                "weight": WEIGHTS["avatar_face_match"],
+                "evidence": [
+                    f"Face match score {accepted.get('score')} between LinkedIn/research photo and GitHub avatar"
+                ],
+            }
+    except Exception as exc:
+        print(f"  [identity_resolve] avatar face match skipped: {exc}", flush=True)
+    return None
 
 
 def extract_signals(
@@ -365,6 +423,10 @@ def resolve_linkedin_github(
         return out
 
     signals = extract_signals(li, gh, known_email=known_email or li.get("email"))
+    # Face match LinkedIn/research photo vs GitHub avatar — Direct signal when strong
+    face_sig = _avatar_face_signal(li, gh, sources=sources)
+    if face_sig:
+        signals.append(face_sig)
     scored = score_match(signals)
 
     # Name-only path: if we somehow only had name similarity with no signals, stay no_match.

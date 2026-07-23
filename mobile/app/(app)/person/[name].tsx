@@ -469,6 +469,19 @@ export default function PersonDetail() {
           {summary.identity_notes ? (
             <Text style={[styles.cardMeta, { marginTop: 8 }]}>{summary.identity_notes}</Text>
           ) : null}
+          {(data?.conflicts || summary.conflicts || []).length ? (
+            <>
+              <SectionTitle>Needs review</SectionTitle>
+              <Body>New evidence conflicted with verified facts — not auto-merged.</Body>
+              {(data?.conflicts || summary.conflicts || []).map((c: any, i: number) => (
+                <Bullet key={i}>
+                  {c.predicate || "conflict"}: {String(c.existing_object || c.existing || "")}
+                  {" vs "}
+                  {String(c.new_object || c.incoming || "")}
+                </Bullet>
+              ))}
+            </>
+          ) : null}
 
           {/* 2. Conversation fuel — overlap is invisible */}
           {hasConversation ? (
@@ -571,6 +584,37 @@ export default function PersonDetail() {
           <Fact label="Sports" value={personal.sports_interests} />
           <Fact label="Weekends" value={personal.weekend_preferences} />
           <Fact label="Family" value={personal.family_background} />
+          <Fact label="Spouse / partner" value={personal.spouse || summary.family?.spouse} />
+          {(personal.children || summary.family?.children || []).length ? (
+            <ListSection
+              title="Children"
+              items={(personal.children || summary.family?.children || []).map((c: any) =>
+                typeof c === "string"
+                  ? c
+                  : [c.name, c.school, c.company, c.note].filter(Boolean).join(" — "),
+              )}
+            />
+          ) : null}
+          {(personal.siblings || summary.family?.siblings || []).length ? (
+            <ListSection
+              title="Siblings"
+              items={(personal.siblings || summary.family?.siblings || []).map((c: any) =>
+                typeof c === "string" ? c : [c.name, c.note].filter(Boolean).join(" — "),
+              )}
+            />
+          ) : null}
+          <Fact
+            label="Estimated age"
+            value={
+              personal.estimated_age_band || summary.estimated_age_band
+                ? `${personal.estimated_age_band || summary.estimated_age_band}${
+                    personal.estimated_age_basis || summary.estimated_age_basis
+                      ? ` (${personal.estimated_age_basis || summary.estimated_age_basis})`
+                      : ""
+                  }`
+                : null
+            }
+          />
           <Fact label="Notes" value={personal.personal_notes} />
 
           <SectionTitle>Public writing & posts</SectionTitle>

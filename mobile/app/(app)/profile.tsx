@@ -511,6 +511,13 @@ export default function ProfileScreen() {
             (personal.hobbies || []).length ||
             (personal.sports_interests || []).length ||
             (personal.family_background || []).length ||
+            personal.spouse ||
+            (personal.children || []).length ||
+            (personal.siblings || []).length ||
+            personal.estimated_age_band ||
+            briefing?.family?.spouse ||
+            (briefing?.family?.children || []).length ||
+            briefing?.estimated_age_band ||
             (personal.personal_notes || []).length) && (
             <>
               <SectionTitle>Personal</SectionTitle>
@@ -522,6 +529,40 @@ export default function ProfileScreen() {
               <Fact label="Sports" value={personal.sports_interests || profile.sports} colors={colors} />
               <Fact label="Weekends" value={personal.weekend_preferences} colors={colors} />
               <Fact label="Family" value={personal.family_background} colors={colors} />
+              <Fact label="Spouse / partner" value={personal.spouse || briefing?.family?.spouse} colors={colors} />
+              {(personal.children || briefing?.family?.children || []).length ? (
+                <ListSection
+                  title="Children"
+                  items={(personal.children || briefing?.family?.children || []).map((c: any) =>
+                    typeof c === "string"
+                      ? c
+                      : [c.name, c.school, c.company, c.note].filter(Boolean).join(" — "),
+                  )}
+                  colors={colors}
+                />
+              ) : null}
+              {(personal.siblings || briefing?.family?.siblings || []).length ? (
+                <ListSection
+                  title="Siblings"
+                  items={(personal.siblings || briefing?.family?.siblings || []).map((c: any) =>
+                    typeof c === "string" ? c : [c.name, c.note].filter(Boolean).join(" — "),
+                  )}
+                  colors={colors}
+                />
+              ) : null}
+              <Fact
+                label="Estimated age"
+                value={
+                  personal.estimated_age_band || briefing?.estimated_age_band
+                    ? `${personal.estimated_age_band || briefing?.estimated_age_band}${
+                        personal.estimated_age_basis || briefing?.estimated_age_basis
+                          ? ` (${personal.estimated_age_basis || briefing?.estimated_age_basis})`
+                          : ""
+                      }`
+                    : null
+                }
+                colors={colors}
+              />
               <Fact label="Notes" value={personal.personal_notes} colors={colors} />
               <ListSection title="Evidence" items={personal.evidence} colors={colors} />
             </>

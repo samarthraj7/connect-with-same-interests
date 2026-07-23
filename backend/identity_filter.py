@@ -7,6 +7,7 @@ must be discarded in code before synthesize.
 from __future__ import annotations
 
 import copy
+import json
 import re
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -272,6 +273,19 @@ def filter_sources_against_linkedin(
                 np["reason"] = "all Nimble pages conflicted with canonical LinkedIn"
             out["nimble_pages"] = np
 
+    # ── Licensed enrichment: drop if LinkedIn URL conflicts with canonical
+    for ek in ("apollo", "aleads", "enrichlayer"):
+        block = out.get(ek)
+        if not isinstance(block, dict):
+            continue
+        other = block.get("linkedin_url") or (block.get("profile") or {}).get("linkedin_url")
+        if other and not same_linkedin(other, canonical):
+            dropped.append(f"{ek}:linkedin_mismatch")
+            out[ek] = {
+                "status": "rejected_identity",
+                "reason": "enrichment LinkedIn does not match chosen identity",
+            }
+
     if dropped:
         print(
             f"  [identity_filter] canonical={canonical} dropped={dropped}",
@@ -359,6 +373,35 @@ def _filter_gemini_blob(gem: dict, canonical: str, *, company, university) -> di
         gem["bio_summary"] = ""
         dropped += 1
         gem["bio_summary_note"] = "cleared — referenced another LinkedIn identity"
+
+    # Scrub career / education / colleagues that cite another LinkedIn or fail org corroboration
+    for field in ("career_history", "education", "awards_and_recognitions"):
+        items = gem.get(field) or []
+        if not isinstance(items, list):
+            continue
+        kept_f = []
+        for item in items:
+            text = item if isinstance(item, str) else json.dumps(item, default=str)
+            if text_declares_other_linkedin(text, canonical):
+                dropped += 1
+                continue
+            kept_f.append(item)
+        gem[field] = kept_f
+
+    for field in ("notable_colleagues", "senior_colleagues"):
+        items = gem.get(field) or []
+        if not isinstance(items, list):
+            continue
+        kept_f = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            blob = f"{item.get('name') or ''} {item.get('context') or ''} {item.get('title') or ''}"
+            if text_declares_other_linkedin(blob, canonical):
+                dropped += 1
+                continue
+            kept_f.append(item)
+        gem[field] = kept_f
 
     # Force canonical on links
     links = dict(gem.get("social_profile_links") or {})

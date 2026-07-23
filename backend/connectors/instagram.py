@@ -31,22 +31,25 @@ def fetch_instagram(
     identity_hints: Optional[dict] = None,
     search_constraints: Optional[dict] = None,
 ) -> dict:
-    sc_key = os.environ.get("SCRAPECREATORS_API_KEY")
-    if not sc_key:
-        return {"status": "skipped", "reason": "SCRAPECREATORS_API_KEY not set"}
-
     hints = identity_hints or {}
     ref_photo = (hints.get("photo_url") or hints.get("linkedin_photo_url") or "").strip()
 
-    # 1) Discover handles via Google + username guesses (no SC name search)
-    discovery = find_profile_candidates(
-        name,
-        "instagram",
-        company=company,
-        known_url=instagram_url,
-        max_candidates=10,
-        search_constraints=search_constraints,
-    )
+    # Channel discovery: OpenCLI → browser session → Google/name find (Agent-Reach order)
+    channel_cands = _channel_instagram_candidates(name, company=company, known_url=instagram_url)
+    discovery = {"status": "ok", "candidates": channel_cands, "method": "channel"} if channel_cands else {}
+
+    sc_key = os.environ.get("SCRAPECREATORS_API_KEY")
+
+    # 1) Discover handles via channels + Google + username guesses
+    if not channel_cands:
+        discovery = find_profile_candidates(
+            name,
+            "instagram",
+            company=company,
+            known_url=instagram_url,
+            max_candidates=10,
+            search_constraints=search_constraints,
+        )
     # Merge any orchestrator-provided URLs
     extra = []
     for u in candidate_urls or []:
@@ -81,13 +84,21 @@ def fetch_instagram(
                 "reason": discovery.get("reason") or "no Instagram profile candidates",
             }
 
-    # 2) Name verify again on SC side: only fetch profiles for name-plausible handles
-    print(
-        f"  [instagram] name-verified candidates → ScrapeCreators deep-fetch "
-        f"({len(uniq[:MAX_FACE_CANDIDATES])}): {[c.get('handle') for c in uniq[:MAX_FACE_CANDIDATES]]}",
-        flush=True,
-    )
-    profiles = _fetch_profiles_parallel(sc_key, uniq[:MAX_FACE_CANDIDATES])
+    # Prefer channel deep-fetch (OpenCLI/browser) before ScrapeCreators
+    profiles = _fetch_profiles_via_channels(uniq[:MAX_FACE_CANDIDATES])
+    if not profiles and sc_key:
+        print(
+            f"  [instagram] name-verified candidates → ScrapeCreators deep-fetch "
+            f"({len(uniq[:MAX_FACE_CANDIDATES])}): {[c.get('handle') for c in uniq[:MAX_FACE_CANDIDATES]]}",
+            flush=True,
+        )
+        profiles = _fetch_profiles_parallel(sc_key, uniq[:MAX_FACE_CANDIDATES])
+    elif not profiles and not sc_key:
+        return {
+            "status": "skipped",
+            "reason": "no OpenCLI/browser session and SCRAPECREATORS_API_KEY not set",
+            "discovery": discovery,
+        }
 
     # Drop profiles whose SC full_name clearly mismatches the query name
     profiles = [p for p in profiles if _sc_name_plausible(name, p)] or profiles
@@ -191,17 +202,13 @@ def fetch_instagram(
     confidence = (verification or {}).get("confidence") or "low"
     is_match = (verification or {}).get("match") is True and confidence in ("high", "medium")
 
-    # Face exact upgrade — only when text verify is not a hard reject
+    # Face exact upgrade — when photos match, confidence is high (unless text hard-rejects)
     if face_result and face_result.get("accepted"):
         if (verification or {}).get("match") is False and confidence == "low":
-            # Conflicting text identity + face: do not force match
             print("  [instagram] face accepted but text verify rejected — keeping ambiguous", flush=True)
         else:
             is_match = True
-            if confidence == "low":
-                confidence = "medium"
-            elif confidence not in ("high", "medium"):
-                confidence = "medium"
+            confidence = "high"
 
     base = {
         "handle": handle,
@@ -266,6 +273,81 @@ def _public_face_match(face_result: Optional[dict]) -> Optional[dict]:
         "rankings": (face_result.get("rankings") or [])[:8],
         "error": face_result.get("error") or face_result.get("reason"),
     }
+
+
+def _channel_instagram_candidates(
+    name: str, *, company: Optional[str] = None, known_url: Optional[str] = None
+) -> List[dict]:
+    """OpenCLI then browser session discovery."""
+    q = f"{name} {company or ''}".strip()
+    out: List[dict] = []
+    if known_url:
+        from connectors.social_find import _handle_from_url
+
+        h = _handle_from_url(known_url, "instagram")
+        if h:
+            out.append({"handle": h, "url": known_url, "method": "known_url", "title": name})
+    try:
+        from connectors import opencli_social
+
+        if opencli_social.configured():
+            res = opencli_social.search_instagram(q, limit=8)
+            if res.get("status") == "ok":
+                out.extend(res.get("candidates") or [])
+                print(f"  [instagram] opencli discovery n={len(res.get('candidates') or [])}", flush=True)
+    except Exception as exc:
+        print(f"  [instagram] opencli discovery skip: {exc}", flush=True)
+    if not out:
+        try:
+            from connectors import browser_social
+
+            if browser_social.configured("instagram"):
+                res = browser_social.search_instagram(q, limit=8)
+                if res.get("status") == "ok":
+                    out.extend(res.get("candidates") or [])
+                    print(f"  [instagram] browser discovery n={len(res.get('candidates') or [])}", flush=True)
+        except Exception as exc:
+            print(f"  [instagram] browser discovery skip: {exc}", flush=True)
+    return out
+
+
+def _fetch_profiles_via_channels(candidates: List[dict]) -> List[dict]:
+    """Deep-fetch profiles via OpenCLI / browser before ScrapeCreators."""
+    out: List[dict] = []
+    for c in candidates:
+        handle = (c.get("handle") or "").lstrip("@")
+        if not handle:
+            continue
+        fetched = None
+        try:
+            from connectors import opencli_social
+
+            if opencli_social.configured():
+                fetched = opencli_social.fetch_instagram_user(handle)
+        except Exception:
+            fetched = None
+        if not fetched or fetched.get("status") != "ok":
+            try:
+                from connectors import browser_social
+
+                if browser_social.configured("instagram"):
+                    fetched = browser_social.fetch_instagram_user(handle)
+            except Exception:
+                fetched = None
+        if fetched and fetched.get("status") == "ok":
+            out.append(
+                {
+                    "handle": handle,
+                    "profile_url": fetched.get("profile_url") or f"https://www.instagram.com/{handle}/",
+                    "profile": fetched.get("profile"),
+                    "recent_posts": fetched.get("recent_posts") or [],
+                    "fetch_status": "ok",
+                    "provider": fetched.get("provider"),
+                }
+            )
+    if out:
+        print(f"  [instagram] channel deep-fetch ok n={len(out)}", flush=True)
+    return out
 
 
 def _sc_name_plausible(name: str, profile_row: dict) -> bool:

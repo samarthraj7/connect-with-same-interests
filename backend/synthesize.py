@@ -16,12 +16,14 @@ You are an expert corporate intelligence analyst. Your task is to transform aggr
 CRITICAL INSTRUCTION: You must operate under a strict zero-hallucination framework. Only include facts explicitly present in the provided JSON. Never invent, extrapolate, assume, or guess details (e.g., do not assume a person's current location based on a past university, or assume a company's size). If a field cannot be completely derived from the data, leave it empty or follow the specific fallback instructions below.
 
 ### SECTION 0: SINGLE-PERSON IDENTITY LOCK
+Do not mix up same-name people. Re-verify every fact against the locked LinkedIn / chosen identity before including it. Create and keep one unique identity for the person chosen at Find Me / research start.
 The Aggregated data includes a "query" object with the selected person's name / company / university / linkedin_url.
 - Treat query.linkedin_url as the CANONICAL identity when present.
+- Prefer "knowledge_graph.verified_claims" (reconciled evidence) over raw connector dumps. Do NOT auto-merge conflicted claims — list them under conflicts only.
 - Discard facts that clearly belong to a different person with the same name (different LinkedIn URL, incompatible employer timeline, conflicting education).
 - If gemini_search or exa_search disagree on linkedin_url, prefer query.linkedin_url and ignore conflicting source blobs.
-- Prefer apollo + aleads + linkedin_public + deep_agent.evidence + nimble_pages.pages + sources that agree with the canonical LinkedIn / company.
-- When nimble_pages.status is "ok", treat pages[].markdown / pages[].text as high-value cited page body (each fact must still end with that page's url). Prefer pages from university directories and employer team/bio pages (mode=directed_org) for career, education, and senior colleagues.
+- Prefer licensed enrichment + linkedin_public + deep_agent.evidence + page_extracts/nimble_pages.pages + sources that agree with the canonical LinkedIn / company.
+- When page extracts (nimble_pages) status is "ok", treat pages[].markdown / pages[].text as high-value cited page body (each fact must still end with that page's url). Prefer pages from university directories and employer team/bio pages (mode=directed_org) for career, education, and senior colleagues.
 When deep_agent.evidence is present, treat those cited facts as high-priority inputs for summary / career / interests.
 
 ### SECTION 1: IDENTITY CROSS-CHECKING & CONFIDENCE
@@ -116,10 +118,32 @@ Respond ONLY with a valid JSON object matching the exact schema below. Do not in
     "sports_interests": [string],
     "weekend_preferences": [string],
     "family_background": [string],
+    "spouse": string or null,
+    "children": [{"name": string or null, "school": string or null, "company": string or null, "note": string or null}],
+    "siblings": [{"name": string or null, "note": string or null}],
+    "estimated_age_band": string or null,
+    "estimated_age_basis": string or null,
+    "bachelors_year": number or null,
     "personal_notes": [string],
     "birthplace_note": string or null,
     "evidence": [{"fact": string, "source_hint": string or null}]
-  }
+  },
+  "family": {
+    "spouse": string or null,
+    "children": [{"name": string or null, "school": string or null, "company": string or null, "note": string or null}],
+    "siblings": [{"name": string or null, "note": string or null}],
+    "notes": [string]
+  },
+  "estimated_age_band": string or null,
+  "estimated_age_basis": string or null,
+  "section_confidence": {
+    "career": "high" | "medium" | "low",
+    "personal": "high" | "medium" | "low",
+    "family": "high" | "medium" | "low",
+    "social": "high" | "medium" | "low"
+  },
+  "citations": [{"fact": string, "url": string, "confidence": number}],
+  "conflicts": [{"predicate": string, "existing": string, "incoming": string, "note": string}]
 }
 """.strip()
 
@@ -172,20 +196,28 @@ def summarize_profile(merged_profile: dict) -> dict:
         "place": query.get("place"),
         "linkedin_url": canonical or query.get("linkedin_url"),
     }
+    kg_payload = merged_profile.get("knowledge_graph_for_llm") or {}
+    conflicts = merged_profile.get("conflicts") or kg_payload.get("conflicts") or []
     corrections = merged_profile.get("prior_user_corrections_text") or ""
     client = genai.Client(api_key=api_key)
     contents = (
         "Selected identity (HARD LOCK — do not mix other same-name people):\n"
         f"{json.dumps(identity, indent=2)}\n\n"
         "RULES:\n"
+        "- Do not mix up identities. Re-verify against the locked LinkedIn before including a fact.\n"
         "- The LinkedIn URL above is the ONLY person you may describe.\n"
-        "- Ignore Peerlist, GitHub, blogs, or posts that belong to a different LinkedIn slug "
-        "(e.g. mayureshchoudhary vs mayuresh-choudhary are DIFFERENT people).\n"
-        "- If sources conflict on school/employer/location, prefer Enrich Layer / LinkedIn-tied "
-        "sources and discard the rest.\n"
-        "- Never invent a blended career from two same-name people.\n\n"
+        "- Prefer knowledge_graph.verified_claims over raw dumps. Never invent.\n"
+        "- Do NOT resolve conflicts yourself — copy unresolved conflicts into output.conflicts.\n"
+        "- Ignore Peerlist, GitHub, blogs, or posts that belong to a different LinkedIn slug.\n"
+        "- If sources conflict on school/employer/location, prefer licensed enrichment / LinkedIn-tied "
+        "sources and leave the conflict in conflicts[].\n"
+        "- Never invent a blended career from two same-name people.\n"
+        "- Include section_confidence and citations[] with public URLs.\n\n"
         + (f"{corrections}\n\n" if corrections else "")
-        + f"Aggregated data:\n{json.dumps({'query': identity, **sources}, indent=2)}"
+        + "Reconciled knowledge graph (authoritative for facts):\n"
+        f"{json.dumps(kg_payload, indent=2)[:60000]}\n\n"
+        f"Known conflicts (do not auto-merge):\n{json.dumps(conflicts, indent=2)[:12000]}\n\n"
+        f"Aggregated data:\n{json.dumps({'query': identity, **sources}, indent=2)}"
     )
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
@@ -196,17 +228,17 @@ def summarize_profile(merged_profile: dict) -> dict:
         thinking_config=types.ThinkingConfig(thinking_budget=0),
     )
 
+    from gemini_retry import user_facing_gemini_error
+
     try:
         response = generate_with_retry(client, model=MODEL, contents=contents, config=config)
-    except errors.ClientError as exc:
-        return {"status": "error", "error": f"Gemini client error: {exc}"}
-    except errors.ServerError as exc:
-        return {"status": "error", "error": f"Gemini unavailable after retries: {exc}"}
+    except (errors.ClientError, errors.ServerError) as exc:
+        return {"status": "error", "error": user_facing_gemini_error(exc)}
 
     text = response.text or ""
     try:
         parsed = json.loads(text)
-        return {"status": "ok", **parsed}
+        return {"status": "ok", **_backfill_family_fields(parsed, sources)}
     except json.JSONDecodeError:
         finish_reason = None
         try:
@@ -215,8 +247,101 @@ def summarize_profile(merged_profile: dict) -> dict:
             pass
         fr_name = getattr(finish_reason, "name", None) or str(finish_reason or "")
         hit_max = "MAX_TOKENS" in str(fr_name)
-        reason = " (hit max_output_tokens — response was cut off mid-JSON)" if hit_max else ""
-        return {"status": "error", "error": f"Gemini response was not valid JSON{reason}", "raw_text": text}
+        # Retry once with a smaller payload when truncated
+        if hit_max or len(text) > 100:
+            try:
+                slim_sources = _aggressive_compact(sources)
+                slim_contents = (
+                    "Selected identity (HARD LOCK):\n"
+                    f"{json.dumps(identity)}\n"
+                    "Return the briefing JSON schema only. Prefer omit over inventing.\n"
+                    f"{json.dumps({'query': identity, **slim_sources})[:48000]}"
+                )
+                response2 = generate_with_retry(
+                    client, model=MODEL, contents=slim_contents, config=config
+                )
+                parsed = json.loads(response2.text or "")
+                return {"status": "ok", **_backfill_family_fields(parsed, sources)}
+            except Exception:
+                pass
+        return {
+            "status": "error",
+            "error": user_facing_gemini_error(None),
+        }
+
+
+def _backfill_family_fields(parsed: dict, sources: dict) -> dict:
+    """If the model omits family/age, copy from personal_info when present."""
+    if not isinstance(parsed, dict):
+        return parsed
+    pi = sources.get("personal_info") if isinstance(sources.get("personal_info"), dict) else {}
+    out_pi = parsed.get("personal_info") if isinstance(parsed.get("personal_info"), dict) else {}
+    if not isinstance(out_pi, dict):
+        out_pi = {}
+        parsed["personal_info"] = out_pi
+
+    for key in (
+        "spouse",
+        "children",
+        "siblings",
+        "family_background",
+        "estimated_age_band",
+        "estimated_age_basis",
+        "bachelors_year",
+    ):
+        if not out_pi.get(key) and pi.get(key):
+            out_pi[key] = pi[key]
+
+    family = parsed.get("family") if isinstance(parsed.get("family"), dict) else {}
+    if not isinstance(family, dict):
+        family = {}
+    if not family.get("spouse") and (out_pi.get("spouse") or pi.get("spouse")):
+        family["spouse"] = out_pi.get("spouse") or pi.get("spouse")
+    if not family.get("children") and (out_pi.get("children") or pi.get("children")):
+        family["children"] = out_pi.get("children") or pi.get("children")
+    if not family.get("siblings") and (out_pi.get("siblings") or pi.get("siblings")):
+        family["siblings"] = out_pi.get("siblings") or pi.get("siblings")
+    if family:
+        parsed["family"] = family
+
+    if not parsed.get("estimated_age_band"):
+        parsed["estimated_age_band"] = (
+            out_pi.get("estimated_age_band") or pi.get("estimated_age_band")
+        )
+    if not parsed.get("estimated_age_basis"):
+        parsed["estimated_age_basis"] = (
+            out_pi.get("estimated_age_basis") or pi.get("estimated_age_basis")
+        )
+    return parsed
+
+
+def _aggressive_compact(sources: dict) -> dict:
+    """Extra-small payload for synthesize retry after MAX_TOKENS."""
+    keep_keys = {
+        "gemini_search",
+        "exa_search",
+        "personal_info",
+        "linkedin_public",
+        "deep_agent",
+        "page_extracts",
+        "nimble_pages",
+        "enrichment",
+        "apollo",
+        "aleads",
+        "enrichlayer",
+        "public_web",
+        "github",
+    }
+    out = {}
+    for k, v in (sources or {}).items():
+        if k not in keep_keys:
+            continue
+        out[k] = _compact_value(v, depth=0)
+    # Cap strings harder
+    blob = json.dumps(out, default=str)
+    if len(blob) > 40000:
+        return {"gemini_search": out.get("gemini_search"), "personal_info": out.get("personal_info"), "deep_agent": out.get("deep_agent")}
+    return out
 
 
 

@@ -221,6 +221,62 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  publicCandidatesStart: (body: {
+    name: string;
+    company?: string | null;
+    university?: string | null;
+    linkedin_url?: string | null;
+  }) =>
+    request<{ status: string; job_id: string }>("/public/candidates/start", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  publicCandidatesJob: (jobId: string) =>
+    request<{
+      status: string;
+      stage?: string;
+      progress?: number;
+      message?: string;
+      error?: string | null;
+      result?: {
+        candidates?: any[];
+        exact?: any[];
+        probable?: any[];
+        match_mode?: string;
+        message?: string;
+        status?: string;
+        partial?: boolean;
+        warning?: string;
+      } | null;
+    }>(`/public/candidates/jobs/${encodeURIComponent(jobId)}`),
+  candidatesStart: (body: {
+    name: string;
+    company?: string | null;
+    university?: string | null;
+    linkedin_url?: string | null;
+  }) =>
+    request<{ status: string; job_id: string }>("/candidates/start", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  candidatesJob: (jobId: string) =>
+    request<{
+      status: string;
+      stage?: string;
+      progress?: number;
+      message?: string;
+      error?: string | null;
+      result?: {
+        candidates?: any[];
+        exact?: any[];
+        probable?: any[];
+        match_mode?: string;
+        message?: string;
+        status?: string;
+        partial?: boolean;
+        warning?: string;
+      } | null;
+    }>(`/candidates/jobs/${encodeURIComponent(jobId)}`),
   publicResearchStart: (body: {
     name: string;
     company?: string | null;

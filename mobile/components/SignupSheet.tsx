@@ -238,27 +238,53 @@ export function SignupSheet({ visible, onClose }: Props) {
       return;
     }
     setLoading(true);
+    setCandidates([]);
+    setMatchMode("");
+    setMatchMessage("");
+    setPicked(null);
+    setStep(1);
     try {
-      const data = await api.publicCandidates({
+      const started = await api.publicCandidatesStart({
         name: name.trim(),
         company: company.trim() || null,
         university: university.trim() || null,
         linkedin_url: linkedin.trim() || null,
       });
-      const mode =
-        data.match_mode ||
-        (data.exact?.length ? "exact" : data.probable?.length ? "probable_only" : "none");
-      const list =
-        mode === "exact"
-          ? data.exact || data.candidates || []
-          : mode === "probable_only"
-            ? data.probable || data.candidates || []
-            : data.candidates || [];
-      setMatchMode(mode);
-      setMatchMessage(data.message || "");
-      setCandidates(list);
-      setPicked(null);
-      setStep(1);
+      const jobId = started.job_id;
+      const applyResult = (data: any) => {
+        const mode =
+          data.match_mode ||
+          (data.exact?.length ? "exact" : data.probable?.length ? "probable_only" : "none");
+        const list =
+          mode === "exact"
+            ? data.exact || data.candidates || []
+            : mode === "probable_only"
+              ? data.probable || data.candidates || []
+              : data.candidates || [];
+        setMatchMode(mode);
+        setMatchMessage(data.message || "");
+        setCandidates(list);
+      };
+      // Progressive poll — show people as they arrive
+      await new Promise<void>((resolve, reject) => {
+        const timer = setInterval(async () => {
+          try {
+            const job = await api.publicCandidatesJob(jobId);
+            if (job.result) applyResult(job.result);
+            if (job.status === "done") {
+              clearInterval(timer);
+              if (job.result) applyResult(job.result);
+              resolve();
+            } else if (job.status === "error") {
+              clearInterval(timer);
+              reject(new Error(job.error || job.message || "Search failed"));
+            }
+          } catch (e: any) {
+            clearInterval(timer);
+            reject(e);
+          }
+        }, 900);
+      });
     } catch (e: any) {
       setError(`${e.message || "Search failed"} (API: ${API_BASE})`);
     } finally {

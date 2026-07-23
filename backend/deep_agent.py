@@ -125,9 +125,10 @@ def run_deep_agent(
 
 
 def _seed_known(sources: dict) -> dict:
-    known: dict[str, Any] = {"facts": [], "roles": [], "urls": []}
+    known: dict[str, Any] = {"facts": [], "roles": [], "urls": [], "family": {}}
     gemini = sources.get("gemini_search") if isinstance(sources.get("gemini_search"), dict) else {}
     apollo = sources.get("apollo") if isinstance(sources.get("apollo"), dict) else {}
+    personal = sources.get("personal_info") if isinstance(sources.get("personal_info"), dict) else {}
     if apollo.get("title"):
         known["roles"].append(apollo["title"])
     if gemini.get("current_role"):
@@ -137,6 +138,14 @@ def _seed_known(sources: dict) -> dict:
             known["facts"].append(item)
         elif isinstance(item, dict) and item.get("title"):
             known["facts"].append(str(item.get("title")))
+    fam = {
+        "spouse": personal.get("spouse"),
+        "children": personal.get("children") or [],
+        "siblings": personal.get("siblings") or [],
+        "family_background": personal.get("family_background") or [],
+        "bachelors_year": personal.get("bachelors_year"),
+    }
+    known["family"] = {k: v for k, v in fam.items() if v}
     return known
 
 
@@ -147,18 +156,29 @@ def _plan_goals(client, *, identity: dict, known: dict, hop: int) -> list[dict]:
         company=identity.get("company"),
         university=identity.get("university"),
     )
+    family = known.get("family") or {}
+    family_gaps = not (
+        family.get("spouse") or family.get("children") or family.get("siblings") or family.get("family_background")
+    )
     prompt = f"""{lock}
 
 You plan PUBLIC web search queries for a pre-meeting briefing.
-Hop {hop}. Prefer queries that find career, education, writing, awards, personal site.
-Do NOT invent LinkedIn URLs. Do NOT target login-gated feeds.
+Hop {hop}. Prefer queries that find career, education, writing, awards, personal site,
+AND publicly documented family (spouse, children, siblings) when missing.
+Do NOT invent LinkedIn URLs. Do NOT target login-gated feeds. Never invent family facts.
+IDENTITY: Do not mix same-name people. Re-verify against the locked identity before merging.
+Create one unique identity for the person chosen at the beginning.
+Prefer blogs, podcasts, alumni directories, wedding/obits over unsourced snippets.
 
 Identity JSON: {json.dumps(identity)}
-Already known: {json.dumps({k: known.get(k) for k in ('facts','roles','next_queries')}, default=str)[:3000]}
+Already known: {json.dumps({k: known.get(k) for k in ('facts','roles','family','next_queries')}, default=str)[:3500]}
+Family gaps: {family_gaps}
 
 Return JSON only:
 {{"goals":[{{"query":string,"focus":string}}]}}
-Max 4 goals. Each query must include the person's name.
+Max 5 goals. Each query must include the person's name.
+If family is thin, include queries like: name + son, name + daughter, name + family, name + sibling.
+If children names are known, query their university/company.
 """
     try:
         resp = generate_with_retry(
@@ -170,15 +190,35 @@ Max 4 goals. Each query must include the person's name.
         data = json.loads(resp.text or "{}")
         goals = data.get("goals") if isinstance(data, dict) else None
         if isinstance(goals, list):
-            return [g for g in goals if isinstance(g, dict)][:4]
+            return [g for g in goals if isinstance(g, dict)][:5]
     except (errors.ClientError, errors.ServerError, json.JSONDecodeError, TypeError) as exc:
         print(f"  [deep_agent] plan error: {exc}", flush=True)
     name = identity.get("name") or ""
     co = identity.get("company") or ""
-    return [
+    uni = identity.get("university") or ""
+    goals = [
         {"query": f'"{name}" {co} career OR biography'.strip(), "focus": "career"},
         {"query": f'"{name}" {co} interview OR talk OR blog'.strip(), "focus": "writing"},
     ]
+    if family_gaps:
+        goals.extend(
+            [
+                {"query": f'"{name}" son OR daughter OR children OR family', "focus": "family"},
+                {"query": f'"{name}" sibling OR brother OR sister', "focus": "siblings"},
+            ]
+        )
+    if uni:
+        goals.append({"query": f'"{name}" "{uni}" alumni OR directory', "focus": "education"})
+    # Children school follow-ups
+    for child in (family.get("children") or [])[:2]:
+        if isinstance(child, dict) and child.get("name"):
+            goals.append(
+                {
+                    "query": f'"{child["name"]}" university OR college OR student',
+                    "focus": "child_education",
+                }
+            )
+    return goals[:5]
 
 
 def _retrieve_urls(query: str, *, identity: dict) -> list[str]:
@@ -273,25 +313,21 @@ def _fetch_pages(urls: list[str]) -> list[dict]:
 
     def one(url: str) -> Optional[dict]:
         try:
-            from connectors import opengraph
+            from page_reader import read_page
 
-            og = opengraph.fetch_open_graph(url)
-            text = ""
-            title = og.get("title") if isinstance(og, dict) else None
-            desc = og.get("description") if isinstance(og, dict) else None
-            if title or desc:
-                text = f"{title or ''}\n{desc or ''}".strip()
-            if len(text) < 80:
-                resp = requests.get(url, headers=HEADERS, timeout=FETCH_TIMEOUT, allow_redirects=True)
-                if resp.ok and "text/html" in (resp.headers.get("content-type") or ""):
-                    raw = re.sub(r"<script[\s\S]*?</script>", " ", resp.text, flags=re.I)
-                    raw = re.sub(r"<style[\s\S]*?</style>", " ", raw, flags=re.I)
-                    raw = re.sub(r"<[^>]+>", " ", raw)
-                    raw = re.sub(r"\s+", " ", raw).strip()
-                    text = (text + "\n" + raw).strip()[:MAX_PAGE_CHARS]
-            if not text:
+            page = read_page(url)
+            if page.get("status") != "ok":
                 return None
-            return {"url": url, "text": text[:MAX_PAGE_CHARS]}
+            text = (page.get("markdown") or page.get("text") or "").strip()
+            if len(text) < 40:
+                return None
+            return {
+                "url": page.get("url") or url,
+                "text": text[:MAX_PAGE_CHARS],
+                "title": page.get("title"),
+                "images": (page.get("images") or [])[:8],
+                "backend": page.get("backend"),
+            }
         except Exception:
             return None
 
@@ -318,7 +354,7 @@ def _extract_facts(client, *, identity: dict, pages: list[dict], known: dict) ->
 Extract ONLY facts about the selected person from these page texts.
 Discard other same-name people. Each fact needs a source_url from the pages.
 Return JSON:
-{{"facts":[{{"fact":string,"source_url":string,"category":"career"|"education"|"writing"|"personal"|"award"|"other"}}]}}
+{{"facts":[{{"fact":string,"source_url":string,"category":"career"|"education"|"writing"|"personal"|"family"|"award"|"other"}}]}}
 
 Pages:
 {blob}

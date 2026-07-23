@@ -27,7 +27,7 @@ from common_ground import (
     apply_overlap_to_summary,
     public_conversation,
 )
-from merge import merge_profile
+from merge import attach_verified_knowledge_graph, merge_profile
 from orchestrator import PersonQuery, SearchOrchestrator
 from storage import SOCIAL_SOURCES, ProfileStore
 from synthesize import summarize_profile
@@ -1331,6 +1331,221 @@ def public_candidates(body: CandidatesBody):
     return _candidates_impl(body)
 
 
+@app.post("/candidates/start")
+def candidates_start(body: CandidatesBody, user=Depends(require_user)):
+    return _candidates_start(body, user_id=user["id"])
+
+
+@app.post("/public/candidates/start")
+def public_candidates_start(body: CandidatesBody):
+    return _candidates_start(body, user_id=None)
+
+
+@app.get("/candidates/jobs/{job_id}")
+def candidates_job(job_id: str, user=Depends(require_user)):
+    return _candidates_job_get(job_id, user_id=user["id"])
+
+
+@app.get("/public/candidates/jobs/{job_id}")
+def public_candidates_job(job_id: str):
+    return _candidates_job_get(job_id, user_id=None)
+
+
+def _candidates_start(body: CandidatesBody, *, user_id: Optional[str]) -> dict:
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(400, "Name required")
+    job_id = uuid.uuid4().hex
+    _job_update(
+        job_id,
+        status="running",
+        stage="searching",
+        progress=0.05,
+        message="Finding people…",
+        user_id=user_id,
+        kind="candidates",
+        result={
+            "candidates": [],
+            "exact": [],
+            "probable": [],
+            "match_mode": "none",
+            "status": "running",
+            "partial": True,
+        },
+        error=None,
+    )
+
+    def worker() -> None:
+        from connectors import gemini_search
+        from source_sanitize import sanitize_candidates, sanitize_error
+
+        def on_update(partial: dict) -> None:
+            cands = sanitize_candidates(list(partial.get("candidates") or []))
+            exact = sanitize_candidates(list(partial.get("exact") or []))
+            probable = sanitize_candidates(list(partial.get("probable") or []))
+            mode = partial.get("match_mode") or "none"
+            n = len(cands)
+            _job_update(
+                job_id,
+                status="running",
+                stage="photos" if partial.get("partial") else "finishing",
+                progress=min(0.95, 0.15 + 0.1 * n),
+                message=f"Found {n} people…" if n else "Searching…",
+                result={
+                    "candidates": cands,
+                    "exact": exact,
+                    "probable": probable,
+                    "match_mode": mode,
+                    "message": partial.get("message"),
+                    "warning": partial.get("warning"),
+                    "discovery": partial.get("discovery"),
+                    "status": "ok",
+                    "partial": bool(partial.get("partial")),
+                },
+            )
+
+        try:
+            result = gemini_search.find_candidates(
+                name,
+                company=(body.company or "").strip() or None,
+                university=(body.university or "").strip() or None,
+                linkedin_url=(body.linkedin_url or "").strip() or None,
+                on_update=on_update,
+            )
+            filtered = _finalize_candidates_response(body, result)
+            _job_update(
+                job_id,
+                status="done",
+                stage="done",
+                progress=1.0,
+                message=filtered.get("message") or "Done",
+                result={**filtered, "partial": False},
+                error=None,
+            )
+        except Exception as exc:
+            _job_update(
+                job_id,
+                status="error",
+                stage="error",
+                progress=1.0,
+                message="Candidate search failed",
+                error=sanitize_error(str(exc)),
+            )
+
+    import threading
+
+    threading.Thread(target=worker, daemon=True).start()
+    return {"status": "ok", "job_id": job_id}
+
+
+def _candidates_job_get(job_id: str, *, user_id: Optional[str]) -> dict:
+    job = _jobs.get(job_id)
+    if not job or job.get("kind") != "candidates":
+        raise HTTPException(404, "Job not found")
+    if user_id and job.get("user_id") and job.get("user_id") != user_id:
+        raise HTTPException(404, "Job not found")
+    return {
+        "status": job.get("status"),
+        "stage": job.get("stage"),
+        "progress": job.get("progress"),
+        "message": job.get("message"),
+        "error": job.get("error"),
+        "result": job.get("result"),
+    }
+
+
+def _finalize_candidates_response(body: CandidatesBody, result: dict) -> dict:
+    status = result.get("status")
+    err = result.get("error") or result.get("reason")
+    if status == "skipped":
+        return {"candidates": [], "status": status, "error": err or "Search unavailable"}
+    if status == "error":
+        return {"candidates": [], "status": status, "error": err or "Candidate search failed"}
+    if status != "ok":
+        return {"candidates": [], "status": status or "not_found", "error": err}
+
+    def _apply_filters(rows: list) -> list:
+        from connectors.exa_search import _candidate_matches_org, _org_aliases
+
+        out_rows = list(rows or [])
+        company = (body.company or "").strip() or None
+        university = (body.university or "").strip() or None
+        linkedin = (body.linkedin_url or "").strip().lower()
+        if company or university:
+            filtered = [
+                c
+                for c in out_rows
+                if _candidate_matches_org(c, company=company, university=university)
+            ]
+            if filtered:
+                out_rows = filtered
+            else:
+                aliases = _org_aliases(university) + _org_aliases(company)
+                loose = []
+                for c in out_rows:
+                    blob = " ".join(
+                        [
+                            str(c.get("company") or ""),
+                            str(c.get("context") or ""),
+                            str(c.get("role") or ""),
+                            str(c.get("location") or ""),
+                        ]
+                    ).lower()
+                    if any(a.lower() in blob for a in aliases if a):
+                        loose.append(c)
+                if loose:
+                    out_rows = loose
+        if linkedin:
+            filtered = [
+                c
+                for c in out_rows
+                if linkedin in (c.get("linkedin_url") or "").lower()
+                or linkedin.replace("https://", "") in (c.get("linkedin_url") or "").lower()
+            ]
+            if filtered:
+                out_rows = filtered
+        return out_rows
+
+    exact = _apply_filters(list(result.get("exact") or []))
+    probable = _apply_filters(list(result.get("probable") or []))
+    match_mode = result.get("match_mode") or (
+        "exact" if exact else "probable_only" if probable else "none"
+    )
+    if match_mode == "exact" and not exact and probable:
+        match_mode = "probable_only"
+    if match_mode == "probable_only" and not probable and exact:
+        match_mode = "exact"
+    if match_mode == "exact":
+        cands = exact
+        probable = []
+    elif match_mode == "probable_only":
+        cands = probable
+        exact = []
+    else:
+        cands = _apply_filters(list(result.get("candidates") or []))
+
+    from name_match import exact_match_message
+    from source_sanitize import sanitize_candidates, sanitize_error
+
+    message = result.get("message") or exact_match_message(match_mode)
+    out = {
+        "candidates": sanitize_candidates(cands),
+        "exact": sanitize_candidates(exact),
+        "probable": sanitize_candidates(probable),
+        "match_mode": match_mode,
+        "status": "ok" if result.get("status") != "error" else "error",
+    }
+    if result.get("status") == "error":
+        out["error"] = sanitize_error(result.get("error"))
+    if message:
+        out["message"] = message
+    if result.get("warning"):
+        out["warning"] = result["warning"]
+    if result.get("discovery"):
+        out["discovery"] = result["discovery"]
+    return out
+
+
 @app.post("/public/research/start")
 def public_research_start(body: PublicResearchBody):
     """Pre-auth research for signup. Poll GET /public/research/jobs/{job_id}."""
@@ -1520,13 +1735,7 @@ def _candidates_impl(body: CandidatesBody):
     name = body.name.strip()
     print("=" * 60, flush=True)
     print(f"[/public/candidates] REQUEST name={name!r}", flush=True)
-    print(
-        f"  filters company={body.company!r} university={body.university!r} "
-        f"linkedin={body.linkedin_url!r}",
-        flush=True,
-    )
     if not name:
-        print("[/public/candidates] REJECT empty name", flush=True)
         raise HTTPException(400, "Name required")
 
     result = gemini_search.find_candidates(
@@ -1535,109 +1744,13 @@ def _candidates_impl(body: CandidatesBody):
         university=(body.university or "").strip() or None,
         linkedin_url=(body.linkedin_url or "").strip() or None,
     )
-    status = result.get("status")
-    err = result.get("error") or result.get("reason")
-    print(f"[/public/candidates] gemini status={status!r} error={err!r}", flush=True)
-
-    if status == "skipped":
-        print(f"[/public/candidates] SKIPPED: {err}", flush=True)
-        return {"candidates": [], "status": status, "error": err or "Gemini unavailable"}
-    if status == "error":
-        print(f"[/public/candidates] ERROR: {err}", flush=True)
-        return {"candidates": [], "status": status, "error": err or "Candidate search failed"}
-    if status != "ok":
-        print(f"[/public/candidates] not_found / empty — returning []", flush=True)
-        return {"candidates": [], "status": status or "not_found", "error": err}
-
-    def _apply_filters(rows: list) -> list:
-        from connectors.exa_search import _candidate_matches_org, _org_aliases
-
-        out_rows = list(rows or [])
-        company = (body.company or "").strip() or None
-        university = (body.university or "").strip() or None
-        linkedin = (body.linkedin_url or "").strip().lower()
-        if company or university:
-            filtered = [
-                c
-                for c in out_rows
-                if _candidate_matches_org(c, company=company, university=university)
-            ]
-            # Prefer org matches; only fall back to full list if discovery found none
-            if filtered:
-                out_rows = filtered
-            else:
-                # Also try loose alias substring on context (USC vs full name)
-                aliases = _org_aliases(university) + _org_aliases(company)
-                loose = []
-                for c in out_rows:
-                    blob = " ".join(
-                        [
-                            str(c.get("company") or ""),
-                            str(c.get("context") or ""),
-                            str(c.get("role") or ""),
-                            str(c.get("location") or ""),
-                        ]
-                    ).lower()
-                    if any(a.lower() in blob for a in aliases if a):
-                        loose.append(c)
-                if loose:
-                    out_rows = loose
-        if linkedin:
-            filtered = [
-                c
-                for c in out_rows
-                if linkedin in (c.get("linkedin_url") or "").lower()
-                or linkedin.replace("https://", "") in (c.get("linkedin_url") or "").lower()
-            ]
-            if filtered:
-                out_rows = filtered
-        return out_rows
-
-    exact = _apply_filters(list(result.get("exact") or []))
-    probable = _apply_filters(list(result.get("probable") or []))
-    match_mode = result.get("match_mode") or ("exact" if exact else "probable_only" if probable else "none")
-
-    # Filters may empty the preferred bucket — fall back to the other.
-    if match_mode == "exact" and not exact and probable:
-        match_mode = "probable_only"
-    if match_mode == "probable_only" and not probable and exact:
-        match_mode = "exact"
-
-    if match_mode == "exact":
-        cands = exact
-        probable = []  # UI shows exact only
-    elif match_mode == "probable_only":
-        cands = probable
-        exact = []
-    else:
-        # Passthrough / empty — keep find_candidates display list
-        cands = _apply_filters(list(result.get("candidates") or []))
-
-    from name_match import exact_match_message
-
-    message = result.get("message") or exact_match_message(match_mode)
-
+    out = _finalize_candidates_response(body, result)
     print(
-        f"[/public/candidates] RESPONSE ok match_mode={match_mode} "
-        f"exact={len(exact)} probable={len(probable)} display={len(cands)}",
+        f"[/public/candidates] RESPONSE match_mode={out.get('match_mode')} "
+        f"display={len(out.get('candidates') or [])}",
         flush=True,
     )
-    for i, c in enumerate(cands):
-        print(f"  → [{i}] {c.get('name')} @ {c.get('company')} | {c.get('role')}", flush=True)
     print("=" * 60, flush=True)
-    out = {
-        "candidates": cands,
-        "exact": exact,
-        "probable": probable,
-        "match_mode": match_mode,
-        "status": "ok",
-    }
-    if message:
-        out["message"] = message
-    if result.get("warning"):
-        out["warning"] = result["warning"]
-    if result.get("discovery"):
-        out["discovery"] = result["discovery"]
     return out
 
 
@@ -1783,6 +1896,8 @@ def get_person(name: str, company: Optional[str] = None, user=Depends(require_us
         if (f.get("person_name") or "").lower() == name.lower()
     ]
     dossier = public_dossier_from_record(record)
+    from source_sanitize import sanitize_source_status, sanitize_sources_for_client
+
     return {
         "visibility": "public",
         "name": record.get("name"),
@@ -1799,27 +1914,38 @@ def get_person(name: str, company: Optional[str] = None, user=Depends(require_us
         },
         "interactions": record.get("interactions") or [],
         "updated_at": record.get("updated_at"),
-        "source_status": record.get("latest_source_status") or {},
+        "source_status": sanitize_source_status(record.get("latest_source_status") or {}),
         "whats_new": record.get("whats_new"),
         "mutuals": mutuals,
         "in_your_network": in_network,
         "pending_facts": pending,
-        "sources": {
-            "apollo": sources.get("apollo"),
-            "public_web": sources.get("public_web"),
-            "personal_info": sources.get("personal_info"),
-            "instagram_public": sources.get("instagram_public"),
-            "facebook_public": sources.get("facebook_public"),
-            "twitter_public": sources.get("twitter_public"),
-            "linkedin_public": sources.get("linkedin_public"),
-            "github": sources.get("github"),
-            "exa_search": {
-                "linkedin_url": (sources.get("exa_search") or {}).get("linkedin_url"),
-                "status": (sources.get("exa_search") or {}).get("status"),
-            }
-            if sources.get("exa_search")
-            else None,
+        "conflicts": record.get("latest_conflicts") or summary.get("conflicts") or [],
+        "knowledge_graph": {
+            "verified_count": len(
+                ((record.get("latest_knowledge_graph") or {}).get("claims") or [])
+            ),
+            "conflict_count": len(record.get("latest_conflicts") or []),
         },
+        "sources": sanitize_sources_for_client(
+            {
+                "enrichment": sources.get("apollo"),
+                "public_web": sources.get("public_web"),
+                "personal_info": sources.get("personal_info"),
+                "instagram_public": sources.get("instagram_public"),
+                "facebook_public": sources.get("facebook_public"),
+                "twitter_public": sources.get("twitter_public"),
+                "linkedin_public": sources.get("linkedin_public"),
+                "github": sources.get("github"),
+                "page_extracts": sources.get("nimble_pages"),
+                "deep_agent": sources.get("deep_agent"),
+                "exa_search": {
+                    "linkedin_url": (sources.get("exa_search") or {}).get("linkedin_url"),
+                    "status": (sources.get("exa_search") or {}).get("status"),
+                }
+                if sources.get("exa_search")
+                else None,
+            }
+        ),
     }
 
 
@@ -1919,21 +2045,19 @@ def add_interaction(
 def health():
     from calendar_prep import calendar_configured
     from db import supabase_enabled
+    from source_sanitize import public_health_flags
 
-    return {
-        "ok": True,
-        "service": "connect-deeply",
-        "apollo_configured": bool((os.environ.get("APOLLO_API_KEY") or "").strip()),
-        "aleads_configured": bool(
-            (os.environ.get("ALEADS_API_KEY") or os.environ.get("A_LEADS_API_KEY") or "").strip()
-        ),
-        "enrichlayer_configured": bool(
-            (os.environ.get("ENRICHLAYER_API_KEY") or os.environ.get("ENRICH_LAYER_API_KEY") or "").strip()
-        ),
-        "nimble_configured": bool((os.environ.get("NIMBLE_API_KEY") or "").strip()),
-        "supabase_configured": supabase_enabled(),
-        "calendar_configured": calendar_configured(),
-    }
+    flags = public_health_flags()
+    flags["calendar_configured"] = calendar_configured()
+    flags["storage_configured"] = supabase_enabled()
+    return flags
+
+
+@app.get("/health/internal")
+def health_internal(user=Depends(require_user)):
+    from source_sanitize import internal_channel_doctor, public_health_flags
+
+    return {**public_health_flags(), "channels": internal_channel_doctor()}
 
 
 # ─── internals ──────────────────────────────────────────────────────────────
@@ -1999,6 +2123,7 @@ def _fetch_person_briefing(
             linkedin_url=linkedin_url,
             github_username=github_username,
             search_constraints=search_constraints,
+            linkedin_locked=bool(linkedin_url),
         ),
         skip=frozenset(skip),
         on_progress=on_progress,
@@ -2062,6 +2187,8 @@ def _fetch_person_briefing(
         },
         raw_results=raw_results,
     )
+    prior_kg = (existing or {}).get("knowledge_graph") or (existing or {}).get("latest_knowledge_graph")
+    attach_verified_knowledge_graph(merged, prior_graph=prior_kg if isinstance(prior_kg, dict) else None)
 
     has_new_data = any(r.get("status") == "ok" for r in raw_results.values())
     if not has_new_data and existing and existing.get("latest_summary"):
@@ -2070,7 +2197,7 @@ def _fetch_person_briefing(
     else:
         from research_feedback import corrections_prompt_block, mark_applied, prior_bad_corrections
 
-        _prog("synthesize", 0.88, "Building your public briefing…")
+        _prog("synthesize", 0.88, "Reconciling evidence and building briefing…")
         cached_sources = (existing or {}).get("latest_sources", {})
         llm_view = copy.deepcopy(merged)
         llm_view["sources"] = {**cached_sources, **raw_results}
@@ -2079,6 +2206,12 @@ def _fetch_person_briefing(
             llm_view["prior_user_corrections"] = prior
             llm_view["prior_user_corrections_text"] = corrections_prompt_block(prior)
         summary = summarize_profile(llm_view)
+        if summary.get("status") == "ok":
+            summary["conflicts"] = summary.get("conflicts") or merged.get("conflicts") or []
+            summary["knowledge_graph"] = {
+                "verified_count": (merged.get("verify_status") or {}).get("verified_count"),
+                "conflict_count": len(merged.get("conflicts") or []),
+            }
         if summary.get("status") != "ok":
             cached = (existing or {}).get("latest_summary")
             if isinstance(cached, dict) and cached.get("status") == "ok":
@@ -2227,6 +2360,7 @@ def _run_research(body: ResearchBody, user: dict) -> dict:
                 place=body.place,
                 linkedin_url=linkedin_url,
                 search_constraints=search_constraints,
+                linkedin_locked=bool(linkedin_url),
             ),
             skip=frozenset(skip),
         )
@@ -2252,6 +2386,8 @@ def _run_research(body: ResearchBody, user: dict) -> dict:
             },
             raw_results=raw_results,
         )
+        prior_kg = (existing or {}).get("knowledge_graph") or (existing or {}).get("latest_knowledge_graph")
+        attach_verified_knowledge_graph(merged, prior_graph=prior_kg if isinstance(prior_kg, dict) else None)
 
         has_new_data = any(r.get("status") == "ok" for r in raw_results.values())
         if not has_new_data and existing and existing.get("latest_summary"):
@@ -2269,6 +2405,12 @@ def _run_research(body: ResearchBody, user: dict) -> dict:
                 llm_view["prior_user_corrections_text"] = corrections_prompt_block(prior)
                 print(f"  [feedback] injecting {len(prior)} prior bad correction(s)", flush=True)
             summary = summarize_profile(llm_view)
+            if summary.get("status") == "ok":
+                summary["conflicts"] = summary.get("conflicts") or merged.get("conflicts") or []
+                summary["knowledge_graph"] = {
+                    "verified_count": (merged.get("verify_status") or {}).get("verified_count"),
+                    "conflict_count": len(merged.get("conflicts") or []),
+                }
             if summary.get("status") != "ok":
                 cached = (existing or {}).get("latest_summary")
                 if isinstance(cached, dict) and cached.get("status") == "ok":

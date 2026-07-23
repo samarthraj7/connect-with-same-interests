@@ -59,40 +59,62 @@ export default function Home() {
     }
     setLoadingCandidates(true);
     try {
-      const res = await api.candidates({
+      const started = await api.candidatesStart({
         name: name.trim(),
         company: company.trim() || null,
         university: university.trim() || null,
         linkedin_url: linkedin.trim() || null,
       });
-      const mode = res.match_mode || (res.exact?.length ? "exact" : res.probable?.length ? "probable_only" : "none");
-      const list =
-        mode === "exact"
-          ? res.exact || res.candidates || []
-          : mode === "probable_only"
-            ? res.probable || res.candidates || []
-            : res.candidates || [];
-      setMatchMode(mode);
-      setMatchMessage(res.message || "");
-      setCandidates(list);
-      if (mode === "probable_only" && list.length) {
-        setMustPick(true);
-        setStatus(
-          res.message ||
-            "Exact match not found. These are the probable people that you might be looking for.",
-        );
-      } else if (list.length > 1) {
-        setMustPick(true);
-        setStatus("Exact matches — pick Full name · Company · Role.");
-      } else if (list.length === 1) {
-        setStatus(
+      const apply = (res: any) => {
+        const mode =
+          res.match_mode || (res.exact?.length ? "exact" : res.probable?.length ? "probable_only" : "none");
+        const list =
           mode === "exact"
-            ? "Exact match found — tap to confirm, or research with the fields below."
-            : "One candidate found — tap to confirm, or research with the fields below.",
-        );
-      } else {
-        setStatus(res.message || "No disambiguation hits — add company or LinkedIn, then research.");
-      }
+            ? res.exact || res.candidates || []
+            : mode === "probable_only"
+              ? res.probable || res.candidates || []
+              : res.candidates || [];
+        setMatchMode(mode);
+        setMatchMessage(res.message || "");
+        setCandidates(list);
+        if (mode === "probable_only" && list.length) {
+          setMustPick(true);
+          setStatus(
+            res.message ||
+              "Exact match not found. These are the probable people that you might be looking for.",
+          );
+        } else if (list.length > 1) {
+          setMustPick(true);
+          setStatus("Exact matches — pick Full name · Company · Role.");
+        } else if (list.length === 1) {
+          setStatus(
+            mode === "exact"
+              ? "Exact match found — tap to confirm, or research with the fields below."
+              : "One candidate found — tap to confirm, or research with the fields below.",
+          );
+        } else {
+          setStatus(res.message || "No disambiguation hits — add company or LinkedIn, then research.");
+        }
+      };
+      await new Promise<void>((resolve, reject) => {
+        const timer = setInterval(async () => {
+          try {
+            const job = await api.candidatesJob(started.job_id);
+            if (job.result) apply(job.result);
+            if (job.status === "done") {
+              clearInterval(timer);
+              if (job.result) apply(job.result);
+              resolve();
+            } else if (job.status === "error") {
+              clearInterval(timer);
+              reject(new Error(job.error || job.message || "Candidate search failed"));
+            }
+          } catch (e: any) {
+            clearInterval(timer);
+            reject(e);
+          }
+        }, 900);
+      });
     } catch (e: any) {
       setError(e.message || "Candidate search failed");
     } finally {
