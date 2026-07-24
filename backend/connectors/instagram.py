@@ -12,7 +12,7 @@ from typing import List, Optional
 
 import requests
 
-from connectors.social_find import find_profile_candidates, find_profile_link
+from connectors.social_find import find_profile_candidates, find_profile_link, rank_profile_candidates
 from connectors.social_verify import verify_social_profile
 
 SCRAPECREATORS_BASE = "https://api.scrapecreators.com"
@@ -34,28 +34,42 @@ def fetch_instagram(
     hints = identity_hints or {}
     ref_photo = (hints.get("photo_url") or hints.get("linkedin_photo_url") or "").strip()
 
-    # Channel discovery: OpenCLI → browser session → Google/name find (Agent-Reach order)
-    channel_cands = _channel_instagram_candidates(name, company=company, known_url=instagram_url)
-    discovery = {"status": "ok", "candidates": channel_cands, "method": "channel"} if channel_cands else {}
+    # Channel discovery + Google/name find — ALWAYS merge (OpenCLI alone misses creative handles)
+    hint = None
+    if search_constraints and isinstance(search_constraints, dict):
+        hint = (search_constraints.get("distinguishable_factor") or "").strip() or None
+    if not hint:
+        hint = (hints.get("distinguishable_factor") or hints.get("hint") or "").strip() or None
 
+    channel_cands = _channel_instagram_candidates(
+        name, company=company, university=university, hint=hint, known_url=instagram_url
+    )
+    discovery = find_profile_candidates(
+        name,
+        "instagram",
+        company=company,
+        university=university,
+        distinguishable_factor=hint,
+        known_url=instagram_url,
+        max_candidates=12,
+        search_constraints=search_constraints,
+    )
+    # Prefer channel hits first, then Google/username guesses
+    cands = list(channel_cands or []) + list(discovery.get("candidates") or [])
+    if channel_cands:
+        discovery = {
+            **(discovery if isinstance(discovery, dict) else {}),
+            "method": f"channel+{(discovery or {}).get('method') or 'google'}",
+            "channel_count": len(channel_cands),
+        }
     sc_key = os.environ.get("SCRAPECREATORS_API_KEY")
 
-    # 1) Discover handles via channels + Google + username guesses
-    if not channel_cands:
-        discovery = find_profile_candidates(
-            name,
-            "instagram",
-            company=company,
-            known_url=instagram_url,
-            max_candidates=10,
-            search_constraints=search_constraints,
-        )
     # Merge any orchestrator-provided URLs
     extra = []
     for u in candidate_urls or []:
         if u:
             extra.append({"url": u, "handle": None, "method": "seed_url", "title": name})
-    cands = list(discovery.get("candidates") or []) + extra
+    cands = list(cands) + extra
     # Dedupe by handle
     seen = set()
     uniq = []
@@ -104,58 +118,117 @@ def fetch_instagram(
     profiles = [p for p in profiles if _sc_name_plausible(name, p)] or profiles
 
     face_result = None
-    chosen = None
-    if ref_photo and len(profiles) >= 1:
-        try:
-            from face_match import compare_faces
+    face_by_handle: dict = {}
+    # Face recognition disabled for now — profile photos are often outdated/mismatched,
+    # so we rely on name + bio/company/uni/hint ranking. Keep the block for easy re-enable.
+    # if ref_photo and len(profiles) >= 1:
+    #     try:
+    #         from face_match import compare_faces
+    #
+    #         face_inputs = []
+    #         for p in profiles:
+    #             pic = (p.get("profile") or {}).get("profile_pic_url")
+    #             if not pic:
+    #                 continue
+    #             face_inputs.append(
+    #                 {
+    #                     "handle": p["handle"],
+    #                     "full_name": (p.get("profile") or {}).get("full_name"),
+    #                     "photo_url": pic,
+    #                     "profile_url": p.get("profile_url"),
+    #                 }
+    #             )
+    #         if face_inputs:
+    #             face_result = compare_faces(ref_photo, face_inputs, person_name=name)
+    #             for row in (face_result or {}).get("rankings") or []:
+    #                 if isinstance(row, dict) and row.get("handle"):
+    #                     face_by_handle[str(row["handle"]).lower()] = row
+    #             accepted = (face_result or {}).get("accepted")
+    #             if accepted:
+    #                 print(
+    #                     f"  [instagram] face exact match @{accepted.get('handle')} "
+    #                     f"score={accepted.get('score')}",
+    #                     flush=True,
+    #                 )
+    #     except Exception as exc:
+    #         face_result = {"status": "error", "error": str(exc)[:200]}
+    #         print(f"  [instagram] face_match error: {exc}", flush=True)
+    print("  [instagram] face recognition skipped (disabled — using bio/name ranking)", flush=True)
 
-            face_inputs = []
-            for p in profiles:
-                pic = (p.get("profile") or {}).get("profile_pic_url")
-                if not pic:
-                    continue
-                face_inputs.append(
-                    {
-                        "handle": p["handle"],
-                        "full_name": (p.get("profile") or {}).get("full_name"),
-                        "photo_url": pic,
-                        "profile_url": p.get("profile_url"),
-                    }
-                )
-            if face_inputs:
-                face_result = compare_faces(ref_photo, face_inputs, person_name=name)
-                accepted = (face_result or {}).get("accepted")
-                if accepted:
-                    handle = accepted["handle"]
-                    chosen = next((p for p in profiles if p["handle"].lower() == handle.lower()), None)
-                    print(f"  [instagram] face exact match @{handle} score={accepted.get('score')}", flush=True)
-                # Do NOT pick a "probable" face (< accepted threshold) — that mixes identities
-        except Exception as exc:
-            face_result = {"status": "error", "error": str(exc)[:200]}
-            print(f"  [instagram] face_match error: {exc}", flush=True)
-
-    # When LinkedIn photo lock exists, never fall back to first Google name hit
-    has_li_photo = bool(ref_photo)
-    if chosen is None and not has_li_photo:
-        chosen = profiles[0] if profiles else None
-    elif chosen is None and has_li_photo:
+    # Multi-signal rank: bio/org/hint + name (+ face if re-enabled) — same display name, different @handles
+    linkedin_slug = (hints.get("linkedin_slug") or "").strip() or None
+    ranked = _rank_instagram_varieties(
+        profiles,
+        name=name,
+        company=company,
+        university=university,
+        place=place,
+        hint=hint,
+        linkedin_slug=linkedin_slug,
+        face_by_handle=face_by_handle,
+    )
+    for row in ranked[:6]:
         print(
-            "  [instagram] no accepted face match vs LinkedIn photo — not attaching name-search IG",
+            f"  [instagram] variety @{row['handle']} total={row['identity_score']:.1f} "
+            f"face={row.get('face_score')} signals={row.get('signals')}",
             flush=True,
         )
 
+    chosen = None
+    # Face-accept path (re-enable with face block above):
+    # accepted = (face_result or {}).get("accepted") if face_result else None
+    # if accepted: ...
+
+    if chosen is None and ranked:
+        best, second = ranked[0], ranked[1] if len(ranked) > 1 else None
+        gap = best["identity_score"] - (second["identity_score"] if second else 0)
+        # Clear winner on bio/name/org signals (face not required)
+        if best["identity_score"] >= 40 and (gap >= 12 or len(ranked) == 1):
+            chosen = next((p for p in profiles if p["handle"].lower() == best["handle"].lower()), None)
+            print(
+                f"  [instagram] multi-signal pick @{best['handle']} "
+                f"(score={best['identity_score']:.1f} gap={gap:.1f})",
+                flush=True,
+            )
+        elif best["identity_score"] >= 28 and gap >= 8:
+            chosen = next((p for p in profiles if p["handle"].lower() == best["handle"].lower()), None)
+            print(
+                f"  [instagram] soft pick @{best['handle']} "
+                f"(score={best['identity_score']:.1f} gap={gap:.1f})",
+                flush=True,
+            )
+
     if not chosen:
         reason = (
-            "no Instagram face match vs LinkedIn photo — refusing name-search fallback"
-            if has_li_photo
+            "multiple Instagram handles for this name — no clear bio/name winner"
+            if ranked and len(ranked) > 1
             else "could not load Instagram profiles for candidates"
         )
         return {
-            "status": "not_found",
+            "status": "ambiguous" if ranked else "not_found",
             "discovery": discovery,
             "face_match": face_result,
+            "handle_varieties": [
+                {
+                    "handle": r["handle"],
+                    "full_name": r.get("full_name"),
+                    "profile_url": r.get("profile_url"),
+                    "profile_pic_url": r.get("profile_pic_url"),
+                    "identity_score": r["identity_score"],
+                    "face_score": r.get("face_score"),
+                    "signals": r.get("signals"),
+                }
+                for r in ranked[:8]
+            ],
             "candidates_checked": [
-                {"handle": p["handle"], "status": p.get("fetch_status")} for p in profiles
+                {
+                    "handle": p["handle"],
+                    "full_name": (p.get("profile") or {}).get("full_name"),
+                    "profile_pic_url": (p.get("profile") or {}).get("profile_pic_url"),
+                    "profile_url": p.get("profile_url"),
+                    "status": p.get("fetch_status"),
+                }
+                for p in profiles
             ],
             "reason": reason,
         }
@@ -202,13 +275,22 @@ def fetch_instagram(
     confidence = (verification or {}).get("confidence") or "low"
     is_match = (verification or {}).get("match") is True and confidence in ("high", "medium")
 
-    # Face exact upgrade — when photos match, confidence is high (unless text hard-rejects)
-    if face_result and face_result.get("accepted"):
-        if (verification or {}).get("match") is False and confidence == "low":
-            print("  [instagram] face accepted but text verify rejected — keeping ambiguous", flush=True)
-        else:
+    # Face exact upgrade — disabled while face recognition is off
+    # if face_result and face_result.get("accepted"):
+    #     if (verification or {}).get("match") is False and confidence == "low":
+    #         print("  [instagram] face accepted but text verify rejected — keeping ambiguous", flush=True)
+    #     else:
+    #         is_match = True
+    #         confidence = "high"
+    # Without face: accept medium+ text verify, or soft-pick with exact name + bio signals
+    if not is_match and ranked:
+        best = next((r for r in ranked if r["handle"].lower() == handle.lower()), None)
+        if best and best["identity_score"] >= 40 and (
+            "exact_name" in (best.get("signals") or []) or "bio:" in str(best.get("signals") or [])
+        ):
             is_match = True
-            confidence = "high"
+            confidence = "medium"
+            print(f"  [instagram] accepting @{handle} via bio/name signals (no face)", flush=True)
 
     base = {
         "handle": handle,
@@ -221,6 +303,18 @@ def fetch_instagram(
         "match_notes": (verification or {}).get("reasons") or [],
         "verification_summary": (verification or {}).get("summary"),
         "face_match": _public_face_match(face_result),
+        "handle_varieties": [
+            {
+                "handle": r["handle"],
+                "full_name": r.get("full_name"),
+                "profile_url": r.get("profile_url"),
+                "identity_score": r["identity_score"],
+                "face_score": r.get("face_score"),
+                "signals": r.get("signals"),
+                "picked": r["handle"].lower() == handle.lower(),
+            }
+            for r in ranked[:8]
+        ] if ranked else None,
         "candidates_checked": [
             {
                 "handle": p["handle"],
@@ -276,39 +370,109 @@ def _public_face_match(face_result: Optional[dict]) -> Optional[dict]:
 
 
 def _channel_instagram_candidates(
-    name: str, *, company: Optional[str] = None, known_url: Optional[str] = None
+    name: str,
+    *,
+    company: Optional[str] = None,
+    university: Optional[str] = None,
+    hint: Optional[str] = None,
+    known_url: Optional[str] = None,
 ) -> List[dict]:
-    """OpenCLI then browser session discovery."""
-    q = f"{name} {company or ''}".strip()
+    """OpenCLI then browser session discovery — try several queries (name ≠ LinkedIn slug)."""
+    queries: List[str] = []
+    if name:
+        queries.append(name.strip())
+    if name and company:
+        queries.append(f"{name} {company}".strip())
+    if name and university:
+        queries.append(f"{name} {university}".strip())
+    if name and hint:
+        queries.append(f"{name} {hint.split(',')[0].strip()}".strip())
+    # De-dupe
+    seen_q = set()
+    ordered = []
+    for q in queries:
+        k = q.lower()
+        if k in seen_q or len(q) < 3:
+            continue
+        seen_q.add(k)
+        ordered.append(q)
+
     out: List[dict] = []
+    seen_h: set = set()
     if known_url:
         from connectors.social_find import _handle_from_url
 
         h = _handle_from_url(known_url, "instagram")
         if h:
+            seen_h.add(h.lower())
             out.append({"handle": h, "url": known_url, "method": "known_url", "title": name})
+
+    def _extend(rows: list, method: str) -> None:
+        for row in rows or []:
+            if not isinstance(row, dict):
+                continue
+            h = (row.get("handle") or "").lstrip("@").lower()
+            if not h or h in seen_h:
+                continue
+            seen_h.add(h)
+            out.append({**row, "method": row.get("method") or method})
+
     try:
         from connectors import opencli_social
 
         if opencli_social.configured():
-            res = opencli_social.search_instagram(q, limit=8)
-            if res.get("status") == "ok":
-                out.extend(res.get("candidates") or [])
-                print(f"  [instagram] opencli discovery n={len(res.get('candidates') or [])}", flush=True)
+            for q in ordered[:4]:
+                res = opencli_social.search_instagram(q, limit=8)
+                if res.get("status") == "ok":
+                    _extend(res.get("candidates") or [], "opencli")
+                    print(
+                        f"  [instagram] opencli query={q!r} n={len(res.get('candidates') or [])}",
+                        flush=True,
+                    )
     except Exception as exc:
         print(f"  [instagram] opencli discovery skip: {exc}", flush=True)
-    if not out:
+
+    if len(out) < 3:
         try:
             from connectors import browser_social
 
             if browser_social.configured("instagram"):
-                res = browser_social.search_instagram(q, limit=8)
-                if res.get("status") == "ok":
-                    out.extend(res.get("candidates") or [])
-                    print(f"  [instagram] browser discovery n={len(res.get('candidates') or [])}", flush=True)
+                for q in ordered[:3]:
+                    res = browser_social.search_instagram(q, limit=8)
+                    if res.get("status") == "ok":
+                        _extend(res.get("candidates") or [], "browser")
+                        print(
+                            f"  [instagram] browser query={q!r} n={len(res.get('candidates') or [])}",
+                            flush=True,
+                        )
         except Exception as exc:
             print(f"  [instagram] browser discovery skip: {exc}", flush=True)
     return out
+
+
+def _rank_instagram_varieties(
+    profiles: List[dict],
+    *,
+    name: str,
+    company: Optional[str],
+    university: Optional[str],
+    place: Optional[str],
+    hint: Optional[str],
+    linkedin_slug: Optional[str],
+    face_by_handle: dict,
+) -> List[dict]:
+    """Score same-name / different-@handle candidates so the right variety can win."""
+    return rank_profile_candidates(
+        profiles,
+        name=name,
+        company=company,
+        university=university,
+        place=place,
+        hint=hint,
+        linkedin_slug=linkedin_slug,
+        face_by_handle=face_by_handle,
+        profile_url_template="https://www.instagram.com/{handle}/",
+    )
 
 
 def _fetch_profiles_via_channels(candidates: List[dict]) -> List[dict]:

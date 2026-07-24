@@ -34,6 +34,7 @@ export default function Home() {
   const [company, setCompany] = useState("");
   const [university, setUniversity] = useState("");
   const [linkedin, setLinkedin] = useState("");
+  const [distinguishableFactor, setDistinguishableFactor] = useState("");
   const [tier, setTier] = useState<"basic" | "detailed">("detailed");
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [matchMode, setMatchMode] = useState<"exact" | "probable_only" | "none" | "">("");
@@ -64,6 +65,7 @@ export default function Home() {
         company: company.trim() || null,
         university: university.trim() || null,
         linkedin_url: linkedin.trim() || null,
+        distinguishable_factor: distinguishableFactor.trim() || null,
       });
       const apply = (res: any) => {
         const mode =
@@ -238,8 +240,27 @@ export default function Home() {
           </Text>
 
           <Field label="Full name" value={name} onChangeText={setName} placeholder="Exact name" />
-          <Field label="Company" value={company} onChangeText={setCompany} placeholder="Required if no school/LinkedIn" />
-          <Field label="University" value={university} onChangeText={setUniversity} placeholder="Optional" />
+          <Field
+            label="Company (optional)"
+            value={company}
+            onChangeText={setCompany}
+            placeholder="Current or recent employer"
+          />
+          <Field
+            label="University (optional)"
+            value={university}
+            onChangeText={setUniversity}
+            placeholder="School or alma mater"
+          />
+          <Text style={{ fontFamily: fonts.body, color: colors.muted, fontSize: 12, marginBottom: 10, lineHeight: 18 }}>
+            Add both if you know them — narrows results faster for common names.
+          </Text>
+          <Field
+            label="Anything else you know? (optional)"
+            value={distinguishableFactor}
+            onChangeText={setDistinguishableFactor}
+            placeholder="robotics, founder, startup, AI…"
+          />
           <Field
             label="LinkedIn URL"
             value={linkedin}
@@ -273,6 +294,9 @@ export default function Home() {
           </View>
 
           <Button title="Find matches" onPress={findPeople} loading={loadingCandidates} style={{ marginTop: 8 }} />
+          <Text style={{ marginTop: 6, fontFamily: fonts.body, color: colors.muted, fontSize: 12, lineHeight: 18 }}>
+            Tip: add a soft clue (robotics, founder…) then Find matches again to re-rank same-name people.
+          </Text>
           <Button
             title={researching ? "Working…" : `Research ${tier}`}
             onPress={() => runResearch()}
@@ -337,8 +361,16 @@ export default function Home() {
               <View style={{ flex: 1 }}>
                 <Text style={{ fontFamily: fonts.bodySemi, fontSize: 16, color: colors.ink }}>{c.name}</Text>
                 <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.muted, marginTop: 4 }}>
-                  {[c.name, c.company, c.role].filter(Boolean).join(" · ")}
+                  {[c.company, c.role].filter(Boolean).join(" · ") || "Tap to research"}
                 </Text>
+                {c.linkedin_url ? (
+                  <Text
+                    style={{ fontFamily: fonts.body, fontSize: 11, color: colors.leaf, marginTop: 2 }}
+                    numberOfLines={1}
+                  >
+                    {String(c.linkedin_url).replace(/^https?:\/\/(www\.)?linkedin\.com\/in\//i, "/in/")}
+                  </Text>
+                ) : null}
               </View>
             </Pressable>
           ))}

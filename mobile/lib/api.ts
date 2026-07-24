@@ -4,6 +4,7 @@ import { Platform } from "react-native";
 
 const TOKEN_KEY = "cd_token";
 const USER_KEY = "cd_user";
+const LAST_PHOTO_KEY = "cd_last_photo";
 
 /*
  * WHERE TO SET THE API URL
@@ -93,6 +94,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export async function saveSession(token: string, user: UserPublic) {
   await AsyncStorage.setItem(TOKEN_KEY, token);
   await AsyncStorage.setItem(USER_KEY, JSON.stringify(user));
+  const photo =
+    (user as any)?.profile?.photo_url ||
+    (user as any)?.photo_url ||
+    (user as any)?.profile?.contact?.photo_url ||
+    "";
+  if (photo && String(photo).startsWith("http")) {
+    await AsyncStorage.setItem(LAST_PHOTO_KEY, String(photo));
+  }
+}
+
+export async function getLastUserPhoto(): Promise<string | null> {
+  return AsyncStorage.getItem(LAST_PHOTO_KEY);
 }
 
 export async function clearSession() {
@@ -190,6 +203,7 @@ export const api = {
     company?: string | null;
     university?: string | null;
     linkedin_url?: string | null;
+    distinguishable_factor?: string | null;
   } | string) =>
     request<{
       candidates: any[];
@@ -208,6 +222,7 @@ export const api = {
     company?: string | null;
     university?: string | null;
     linkedin_url?: string | null;
+    distinguishable_factor?: string | null;
   }) =>
     request<{
       candidates: any[];
@@ -226,6 +241,7 @@ export const api = {
     company?: string | null;
     university?: string | null;
     linkedin_url?: string | null;
+    distinguishable_factor?: string | null;
   }) =>
     request<{ status: string; job_id: string }>("/public/candidates/start", {
       method: "POST",
@@ -254,6 +270,7 @@ export const api = {
     company?: string | null;
     university?: string | null;
     linkedin_url?: string | null;
+    distinguishable_factor?: string | null;
   }) =>
     request<{ status: string; job_id: string }>("/candidates/start", {
       method: "POST",

@@ -88,6 +88,8 @@ def find_profile_candidates(
     name: str,
     platform: str,
     company: Optional[str] = None,
+    university: Optional[str] = None,
+    distinguishable_factor: Optional[str] = None,
     known_url: Optional[str] = None,
     max_candidates: int = 10,
     search_constraints: Optional[dict] = None,
@@ -107,6 +109,8 @@ def find_profile_candidates(
     candidates: List[dict] = []
     sc = search_constraints or {}
     reject_handles = {h.lower().lstrip("@") for h in (sc.get("reject_handles") or []) if h}
+    hint = (distinguishable_factor or sc.get("distinguishable_factor") or "").strip() or None
+    uni = (university or "").strip() or None
 
     def _add(url: Optional[str], *, method: str, title: Optional[str] = None, handle: Optional[str] = None):
         if len(candidates) >= max_candidates * 2:  # gather extra before name filter
@@ -139,10 +143,18 @@ def find_profile_candidates(
         if _is_profile_url(resolved, platform):
             _add(resolved, method="known_url")
 
-    for i, query in enumerate(_google_queries(name, platform, company), start=1):
+    queries = _google_queries(
+        name,
+        platform,
+        company,
+        university=uni,
+        distinguishable_factor=hint,
+    )
+    max_attempts = max(MAX_GOOGLE_ATTEMPTS, 3 if (company or uni or hint) else MAX_GOOGLE_ATTEMPTS)
+    for i, query in enumerate(queries[:max_attempts], start=1):
         if len(candidates) >= max_candidates * 2:
             break
-        print(f"  [social] Google candidates attempt {i}/{MAX_GOOGLE_ATTEMPTS}: {query!r}")
+        print(f"  [social] Google candidates attempt {i}/{max_attempts}: {query!r}")
         hit = _google_collect_profiles(query, platform, name, limit=max_candidates)
         ok = bool((hit or {}).get("candidates"))
         attempts.append(
@@ -196,34 +208,9 @@ def find_profile_candidates(
 
 
 def _username_guesses(name: str) -> List[str]:
-    parts = [p for p in re.split(r"[^A-Za-z0-9]+", (name or "").strip()) if p]
-    if not parts:
-        return []
-    guesses: List[str] = []
-    first = parts[0].lower()
-    last = parts[-1].lower() if len(parts) > 1 else ""
-    if last:
-        guesses.extend(
-            [
-                f"{first}{last}",
-                f"{first}.{last}",
-                f"{first}_{last}",
-                f"{first[0]}{last}" if first else last,
-                f"{first}{last[0]}" if last else first,
-            ]
-        )
-    else:
-        guesses.append(first)
-    # Dedupe, valid IG-ish handles
-    out = []
-    seen = set()
-    for g in guesses:
-        g = re.sub(r"[^a-z0-9._]", "", g.lower())[:30]
-        if len(g) < 3 or g in seen:
-            continue
-        seen.add(g)
-        out.append(g)
-    return out[:6]
+    from handle_variants import username_variants
+
+    return username_variants(name, limit=8)
 
 
 def _name_matches_candidate(name: str, candidate: dict) -> bool:
@@ -328,19 +315,51 @@ def _google_collect_profiles(query: str, platform: str, name: str, *, limit: int
 
 
 
-def _google_queries(name: str, platform: str, company: Optional[str]) -> List[str]:
+def _google_queries(
+    name: str,
+    platform: str,
+    company: Optional[str],
+    *,
+    university: Optional[str] = None,
+    distinguishable_factor: Optional[str] = None,
+) -> List[str]:
     label = {"instagram": "Instagram", "facebook": "Facebook", "twitter": "Twitter"}[platform]
     host = {"instagram": "instagram.com", "facebook": "facebook.com", "twitter": "twitter.com"}[platform]
-    queries = [
-        f'"{name}" {label}',
-        f"{name} {label}",
-        f'site:{host} "{name}"',
-        f'"{name}" {label} profile',
-    ]
-    # If company exists, swap attempt 4 for a name+company variant (still short)
+    # Prioritize disambiguating queries first — common names need the hint/org early
+    queries: List[str] = []
     if company:
-        queries[3] = f'"{name}" {label} {company.split(",")[0].strip()}'
-    return queries[:MAX_GOOGLE_ATTEMPTS]
+        co = company.split(",")[0].strip()
+        queries.append(f'"{name}" {label} {co}')
+        queries.append(f'"{name}" {co} site:{host}')
+    if university:
+        uni = university.split(",")[0].strip()
+        queries.append(f'"{name}" {label} {uni}')
+        queries.append(f'"{name}" {uni} site:{host}')
+    if distinguishable_factor:
+        hint = distinguishable_factor.strip()
+        # Take first few tokens/phrases
+        bits = [b.strip() for b in re.split(r"[,;/|]+", hint) if b.strip()][:3] or [hint]
+        for bit in bits:
+            queries.append(f'"{name}" {label} {bit}')
+            queries.append(f'"{name}" {bit} site:{host}')
+    queries.extend(
+        [
+            f'"{name}" {label}',
+            f"{name} {label}",
+            f'site:{host} "{name}"',
+            f'"{name}" {label} profile',
+        ]
+    )
+    # De-dupe preserve order
+    seen = set()
+    out = []
+    for q in queries:
+        k = q.lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(q)
+    return out
 
 
 def _google_first_profile(query: str, platform: str, name: str) -> Optional[dict]:
@@ -704,3 +723,135 @@ def _handle_from_url(url: Optional[str], platform: str) -> Optional[str]:
         return None
 
     return None
+
+
+def rank_profile_candidates(
+    profiles: List[dict],
+    *,
+    name: str,
+    company: Optional[str] = None,
+    university: Optional[str] = None,
+    place: Optional[str] = None,
+    hint: Optional[str] = None,
+    linkedin_slug: Optional[str] = None,
+    face_by_handle: Optional[dict] = None,
+    profile_url_template: Optional[str] = None,
+) -> List[dict]:
+    """Score same-name / different-handle candidates (shared by IG / FB / Twitter).
+
+    Expects each profile row shaped like::
+      {handle, profile_url?, profile: {full_name|name, biography|bio, ...}, fetch_status?}
+    """
+    from name_match import is_exact_name_match, name_tokens
+
+    face_by_handle = face_by_handle or {}
+    q_tokens = name_tokens(name)
+    org_bits: List[str] = []
+    for raw in (company, university, place, hint):
+        if not raw:
+            continue
+        org_bits.extend(re.findall(r"[A-Za-z][A-Za-z0-9&.-]{2,}", str(raw).lower()))
+    org_bits = list(dict.fromkeys(org_bits))[:12]
+    slug = re.sub(r"[^a-z0-9]", "", (linkedin_slug or "").lower())
+
+    ranked: List[dict] = []
+    for p in profiles:
+        if p.get("fetch_status") == "error":
+            continue
+        handle = (p.get("handle") or "").lstrip("@")
+        if not handle:
+            continue
+        prof = p.get("profile") or {}
+        full_name = prof.get("full_name") or prof.get("name") or ""
+        bio = " ".join(
+            [
+                full_name,
+                prof.get("biography") or prof.get("bio") or "",
+                prof.get("external_url") or prof.get("website") or "",
+                handle,
+            ]
+        ).lower()
+        face_row = face_by_handle.get(handle.lower()) or {}
+        face_score = float(face_row.get("score") or 0)
+        signals: List[str] = []
+        score = 0.0
+
+        if face_score:
+            score += face_score * 0.55
+            if face_row.get("same_person"):
+                score += 8
+                signals.append("face_same")
+            signals.append(f"face:{int(face_score)}")
+
+        if full_name and is_exact_name_match(name, full_name):
+            score += 18
+            signals.append("exact_name")
+        elif full_name and q_tokens:
+            hits = sum(1 for t in q_tokens if t in full_name.lower())
+            if hits >= min(2, len(q_tokens)):
+                score += 10
+                signals.append("name_tokens")
+
+        org_hits = [b for b in org_bits if b in bio]
+        if org_hits:
+            score += min(22, 6 * len(org_hits))
+            signals.append("bio:" + ",".join(org_hits[:3]))
+
+        h_norm = re.sub(r"[^a-z0-9]", "", handle.lower())
+        if slug and h_norm:
+            slug_looks_named = any(t[:3] in slug for t in q_tokens[:2]) if q_tokens else False
+            if slug_looks_named and (slug == h_norm or slug in h_norm or h_norm in slug):
+                score += 14
+                signals.append("linkedin_slug")
+            elif slug_looks_named and len(slug) >= 4 and (slug[:4] in h_norm or h_norm[:4] in slug):
+                score += 6
+                signals.append("slug_partial")
+
+        if q_tokens and q_tokens[0][:3] in h_norm:
+            score += 3
+
+        default_url = (
+            (profile_url_template or "").format(handle=handle)
+            if profile_url_template
+            else None
+        )
+        ranked.append(
+            {
+                "handle": handle,
+                "full_name": full_name,
+                "profile_url": p.get("profile_url") or default_url,
+                "profile_pic_url": prof.get("profile_pic_url"),
+                "identity_score": round(score, 1),
+                "face_score": face_score or None,
+                "signals": signals,
+            }
+        )
+
+    ranked.sort(key=lambda r: (-r["identity_score"], -(r.get("face_score") or 0)))
+    return ranked
+
+
+def pick_ranked_profile(
+    ranked: List[dict],
+    profiles: List[dict],
+    *,
+    hard_min: float = 40,
+    hard_gap: float = 12,
+    soft_min: float = 28,
+    soft_gap: float = 8,
+) -> Optional[dict]:
+    """Pick a clear/soft winner from rank_profile_candidates output, or None."""
+    if not ranked:
+        return None
+    best, second = ranked[0], ranked[1] if len(ranked) > 1 else None
+    gap = best["identity_score"] - (second["identity_score"] if second else 0)
+    if best["identity_score"] >= hard_min and (gap >= hard_gap or len(ranked) == 1):
+        chosen_handle = best["handle"].lower()
+    elif best["identity_score"] >= soft_min and gap >= soft_gap:
+        chosen_handle = best["handle"].lower()
+    else:
+        return None
+    return next(
+        (p for p in profiles if (p.get("handle") or "").lstrip("@").lower() == chosen_handle),
+        None,
+    )

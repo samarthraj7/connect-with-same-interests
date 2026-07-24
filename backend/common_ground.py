@@ -44,7 +44,7 @@ interesting, engaging things to talk about. The end user should never see
 
 ### PRIORITIZE LIVED INTERESTS & DEEP BRIDGES
 - Actively mine YOU.hobbies, YOU.sports, YOU.interests AND THEM.personal_info.hobbies /
-  sports_interests / interests / public writing for conversation fuel.
+  sports_interests / side_hustles / interesting_facts / interests / public writing for conversation fuel.
 - Prefer place, hometown, family background, shared university, shared company, and
   children's schools (only when BOTH sides evidence them) over LinkedIn headline restatements.
 - Prefer a specific shared hobby/sport/interest over a generic job-title bridge when both exist.
@@ -71,8 +71,19 @@ If THEM.profile_density is "sparse" OR THEM.user_supplied_facts is the main sign
    - topic: short engaging label (not "Overlap: X")
    - hook: 1–2 sentences on why this is interesting to discuss with THEM
 3) related_topics — adjacent themes worth exploring
-4) openers — 4–6 light, spoken-tone icebreakers YOU could say
+4) openers — 4–6 light, spoken-tone icebreakers YOU could say out loud.
+   Each opener MUST:
+   - Name ONE concrete shared artifact from BOTH sides (city, hobby, school,
+     company, collaborator, paper, sport, team, children's school, club).
+   - Sound like a real first sentence in a hallway — under ~25 words.
+   - Include a tiny YOU anchor ("I also…", "when I was at…") so it isn't just
+     "I saw your LinkedIn".
+   Ban: "What brought you to tech?", "I'd love to connect", "we have so much
+   in common", "I noticed we both…", empty compliments. Prefer grounded lines
+   like "You were at Stanford around the same time I was in CS — did you catch
+   the HCI seminars?" when BOTH sides support it.
 5) deep_questions — 4–6 substantive questions (or fewer if THEM is sparse)
+   that dig into the same concrete bridges — not LinkedIn-headline restatements.
 6) conversation_brief — 2–3 sentences: best overall angle for the meeting
 7) message_angle — one short LinkedIn / intro note premise
 8) your_profile_gaps — what YOU should add to improve future conversation ideas
@@ -286,6 +297,22 @@ def _normalize_engine_output(parsed: dict[str, Any]) -> dict[str, Any]:
             if isinstance(g, dict)
         ]
 
+    openers = list(parsed.get("openers") or parsed.get("conversation_starters") or [])
+    # Drop openers that don't share any meaningful token with bridge points
+    bridge_blob = " ".join(
+        str((b or {}).get("point") or "")
+        for b in (bridges or [])
+        if isinstance(b, dict)
+    ).lower()
+    if bridge_blob and openers:
+        filtered = []
+        for o in openers:
+            text = str(o).lower()
+            tokens = [t for t in text.replace("?", " ").split() if len(t) > 3]
+            if any(t in bridge_blob for t in tokens[:8]) or len(filtered) < 2:
+                filtered.append(o)
+        openers = filtered[:6] or openers[:4]
+
     return {
         "_overlap_score": score,
         "_internal_bridges": bridges or [],
@@ -294,7 +321,7 @@ def _normalize_engine_output(parsed: dict[str, Any]) -> dict[str, Any]:
         "related_topics": parsed.get("related_topics")
         or parsed.get("related_topics_to_discuss")
         or [],
-        "openers": parsed.get("openers") or parsed.get("conversation_starters") or [],
+        "openers": openers,
         "deep_questions": parsed.get("deep_questions") or parsed.get("deep_dive_questions") or [],
         "message_angle": parsed.get("message_angle") or parsed.get("outreach_angle") or "",
         "your_profile_gaps": parsed.get("your_profile_gaps") or [],
@@ -307,7 +334,7 @@ def _normalize_engine_output(parsed: dict[str, Any]) -> dict[str, Any]:
         "related_topics_to_discuss": parsed.get("related_topics")
         or parsed.get("related_topics_to_discuss")
         or [],
-        "conversation_starters": parsed.get("openers") or parsed.get("conversation_starters") or [],
+        "conversation_starters": openers,
         "deep_dive_questions": parsed.get("deep_questions") or parsed.get("deep_dive_questions") or [],
         "outreach_angle": parsed.get("message_angle") or parsed.get("outreach_angle") or "",
     }
@@ -340,6 +367,8 @@ def _them_brief(
                 "lived_in",
                 "hobbies",
                 "sports_interests",
+                "side_hustles",
+                "interesting_facts",
                 "weekend_preferences",
                 "family_background",
                 "spouse",
@@ -390,13 +419,22 @@ def _them_brief(
     # Fold user-supplied and research hobbies/sports onto top-level for the model
     hobbies = list(personal.get("hobbies") or [])
     sports = list(personal.get("sports_interests") or personal.get("sports") or [])
+    for item in list(personal.get("side_hustles") or [])[:4]:
+        if item and item not in hobbies:
+            hobbies.append(item)
     interests = list(brief.get("interests") or [])
     for item in hobbies + sports:
         if item and item not in interests:
             interests.append(item)
+    for item in (personal.get("interesting_facts") or [])[:3]:
+        short = str(item).split(":", 1)[-1].strip() if isinstance(item, str) else str(item)
+        if short and len(short) < 100 and short not in interests:
+            interests.append(short)
     if interests:
         brief["interests"] = interests
+    if hobbies:
         brief["hobbies"] = hobbies
+    if sports:
         brief["sports"] = sports
     pub_web = (sources or {}).get("public_web") or {}
     if isinstance(pub_web, dict) and pub_web.get("status") == "ok":

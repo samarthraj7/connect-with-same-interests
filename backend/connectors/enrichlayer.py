@@ -14,6 +14,14 @@ import requests
 
 ENRICHLAYER_BASE = "https://enrichlayer.com/api/v2"
 
+# Short-lived in-process cache for fetch_profile within one research run
+_profile_cache: dict[str, dict[str, Any]] = {}
+
+
+def clear_profile_cache() -> None:
+    """Clear per-run fetch_profile cache (call at start of SearchOrchestrator.run)."""
+    _profile_cache.clear()
+
 
 def _api_key() -> Optional[str]:
     return (
@@ -98,6 +106,11 @@ def fetch_profile(linkedin_url: str, *, timeout: float = 20) -> dict[str, Any]:
     if not profile_url:
         return {"status": "skipped", "reason": "invalid linkedin url"}
 
+    cached = _profile_cache.get(profile_url)
+    if cached is not None:
+        print(f"  [enrichlayer] profile cache hit {profile_url}", flush=True)
+        return dict(cached)
+
     print(f"  [enrichlayer] profile {profile_url}", flush=True)
     try:
         resp = requests.get(
@@ -121,7 +134,10 @@ def fetch_profile(linkedin_url: str, *, timeout: float = 20) -> dict[str, Any]:
                 "detail": (resp.text or "")[:400],
             }
         data = resp.json() if resp.content else {}
-        return _normalize_profile(data, linkedin_url=profile_url)
+        out = _normalize_profile(data, linkedin_url=profile_url)
+        if out.get("status") == "ok":
+            _profile_cache[profile_url] = dict(out)
+        return out
     except requests.RequestException as e:
         return {"status": "error", "error": str(e)}
 

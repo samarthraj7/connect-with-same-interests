@@ -97,6 +97,7 @@ export function SignupSheet({ visible, onClose }: Props) {
   const [company, setCompany] = useState("");
   const [university, setUniversity] = useState("");
   const [linkedin, setLinkedin] = useState("");
+  const [distinguishableFactor, setDistinguishableFactor] = useState("");
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [matchMode, setMatchMode] = useState<"exact" | "probable_only" | "none" | "">("");
   const [matchMessage, setMatchMessage] = useState("");
@@ -152,6 +153,7 @@ export function SignupSheet({ visible, onClose }: Props) {
       setCompany("");
       setUniversity("");
       setLinkedin("");
+      setDistinguishableFactor("");
       setName("");
       setRatingNotes("");
       setShowBadForm(false);
@@ -249,6 +251,7 @@ export function SignupSheet({ visible, onClose }: Props) {
         company: company.trim() || null,
         university: university.trim() || null,
         linkedin_url: linkedin.trim() || null,
+        distinguishable_factor: distinguishableFactor.trim() || null,
       });
       const jobId = started.job_id;
       const applyResult = (data: any) => {
@@ -398,9 +401,14 @@ export function SignupSheet({ visible, onClose }: Props) {
         research_me: false,
         draft_id: draftId,
         email_verified_token: emailVerifiedToken,
+        photo_url: picked?.photo_url || briefing?.photo_url || null,
         talking_goals: ["Find genuine common ground before meetings"],
       });
       await setSession(signup.token, signup.user);
+      if (picked?.photo_url) {
+        const { default: AsyncStorage } = await import("@react-native-async-storage/async-storage");
+        await AsyncStorage.setItem("cd_last_photo", picked.photo_url);
+      }
       await refresh();
       onClose();
     } catch (e: any) {
@@ -514,13 +522,41 @@ export function SignupSheet({ visible, onClose }: Props) {
                 <View>
                   <Pressable onPress={() => setShowFilters((s) => !s)}>
                     <Text style={{ fontFamily: fonts.bodyMed, color: colors.leaf, marginBottom: 8 }}>
-                      {showFilters ? "Hide filters" : "Optional filters (company / university / LinkedIn)"}
+                      {showFilters ? "Hide filters" : "Optional filters (company / university / hint / LinkedIn)"}
                     </Text>
                   </Pressable>
                   {showFilters ? (
                     <View>
-                      <Field label="Company" value={company} onChangeText={setCompany} />
-                      <Field label="University" value={university} onChangeText={setUniversity} />
+                      <Field
+                        label="Company (pick company OR university)"
+                        value={company}
+                        onChangeText={(t) => {
+                          setCompany(t);
+                          if (t.trim()) setUniversity("");
+                        }}
+                        placeholder="One filter is enough"
+                      />
+                      <Field
+                        label="University (pick company OR university)"
+                        value={university}
+                        onChangeText={(t) => {
+                          setUniversity(t);
+                          if (t.trim()) setCompany("");
+                        }}
+                        placeholder="One filter is enough"
+                      />
+                      <Text style={{ fontFamily: fonts.body, color: colors.muted, fontSize: 12, marginBottom: 8 }}>
+                        Add only one of company or university for Google search — not both.
+                      </Text>
+                      <Field
+                        label="Anything else you know? (optional)"
+                        value={distinguishableFactor}
+                        onChangeText={setDistinguishableFactor}
+                        placeholder="robotics, founder, startup, AI…"
+                      />
+                      <Text style={{ fontFamily: fonts.body, color: colors.muted, fontSize: 12, marginBottom: 8 }}>
+                        Soft clue to re-rank same-name matches — does not replace company or LinkedIn.
+                      </Text>
                       <Field label="LinkedIn URL or id" autoCapitalize="none" value={linkedin} onChangeText={setLinkedin} />
                       <Button title="Re-search matches" onPress={findCandidates} loading={loading} style={{ marginBottom: 10 }} />
                     </View>
@@ -562,6 +598,14 @@ export function SignupSheet({ visible, onClose }: Props) {
                         <Text style={{ fontFamily: fonts.body, color: colors.muted, marginTop: 4, fontSize: 13 }}>
                           {[c.company, c.role].filter(Boolean).join(" · ") || c.context || ""}
                         </Text>
+                        {c.linkedin_url ? (
+                          <Text
+                            style={{ fontFamily: fonts.body, color: colors.leaf, marginTop: 2, fontSize: 11 }}
+                            numberOfLines={1}
+                          >
+                            {String(c.linkedin_url).replace(/^https?:\/\/(www\.)?linkedin\.com\/in\//i, "/in/")}
+                          </Text>
+                        ) : null}
                       </View>
                     </Pressable>
                   ))}

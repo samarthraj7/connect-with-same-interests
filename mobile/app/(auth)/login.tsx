@@ -1,10 +1,10 @@
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useState } from "react";
+import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ScreenBackdrop } from "../../components/ScreenBackdrop";
 import { BrandMark, Button, Field } from "../../components/ui";
-import { api } from "../../lib/api";
+import { api, getLastUserPhoto } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { fonts, space } from "../../lib/theme";
 import { useTheme } from "../../lib/theme-context";
@@ -18,6 +18,13 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    getLastUserPhoto()
+      .then((u) => setPhotoUrl(u))
+      .catch(() => undefined);
+  }, []);
 
   const onSubmit = async () => {
     setError("");
@@ -39,6 +46,7 @@ export default function Login() {
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
           <ScrollView contentContainerStyle={styles.pad} keyboardShouldPersistTaps="handled">
             <BrandMark />
+            {photoUrl ? <Image source={{ uri: photoUrl }} style={styles.avatar} /> : null}
             <Text style={{ fontFamily: fonts.body, color: colors.muted, marginVertical: space.lg, fontSize: 16 }}>
               Welcome back.
             </Text>
@@ -56,4 +64,11 @@ export default function Login() {
 
 const styles = StyleSheet.create({
   pad: { padding: space.lg, paddingTop: space.xl },
+  avatar: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    marginTop: space.md,
+    backgroundColor: "#ddd",
+  },
 });
