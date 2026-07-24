@@ -249,6 +249,14 @@ def search_constraints_from_feedback(rows: List[dict[str, Any]]) -> dict[str, An
             extra_bits.append("prefer recent role/employer evidence")
         if "peerlist" in blob:
             reject_domains.append("peerlist.com")
+        # Wrong LinkedIn → reject the slug that was used on that failed draft
+        if notes_imply_wrong_linkedin(notes):
+            from identity_lock import linkedin_slug
+
+            bad_slug = linkedin_slug(r.get("linkedin_url"))
+            if bad_slug and bad_slug not in reject_slugs:
+                reject_slugs.append(bad_slug)
+            extra_bits.append("LinkedIn URL was wrong — rediscover with name + company/university + LinkedIn keyword")
         if notes and len(notes) > 8:
             # Keep a short freeform exclusion cue for prompts
             clip = notes[:120].replace("\n", " ")
@@ -311,6 +319,177 @@ def merged_search_constraints(
     if not rows:
         return {}
     return search_constraints_from_feedback(rows)
+
+
+def notes_imply_wrong_linkedin(notes: Optional[str]) -> bool:
+    blob = (notes or "").lower()
+    if not blob:
+        return False
+    cues = (
+        "wrong linkedin",
+        "incorrect linkedin",
+        "bad linkedin",
+        "linkedin is wrong",
+        "linkedin wrong",
+        "wrong li ",
+        "wrong profile url",
+        "not their linkedin",
+        "different linkedin",
+        "linkedin doesn't match",
+        "linkedin does not match",
+        "mistaken linkedin",
+        "false linkedin",
+    )
+    return any(c in blob for c in cues) or (
+        "linkedin" in blob and any(w in blob for w in ("wrong", "incorrect", "not this", "different person"))
+    )
+
+
+def apply_linkedin_correction_from_notes(
+    *,
+    name: str,
+    company: Optional[str] = None,
+    university: Optional[str] = None,
+    place: Optional[str] = None,
+    linkedin_url: Optional[str] = None,
+    wrong_notes: Optional[str] = None,
+) -> tuple[Optional[str], dict[str, Any]]:
+    """If notes say LinkedIn is wrong, reject current slug and rediscover via Gemini.
+
+    Returns (linkedin_url_or_none, meta).
+    """
+    from identity_lock import linkedin_slug, normalize_linkedin_url
+
+    meta: dict[str, Any] = {"rediscovered": False, "cleared": False}
+    notes = (wrong_notes or "").strip()
+    current = normalize_linkedin_url(linkedin_url)
+    if not notes_imply_wrong_linkedin(notes):
+        return current, meta
+
+    reject = []
+    if current:
+        slug = linkedin_slug(current)
+        if slug:
+            reject.append(slug)
+        meta["cleared"] = True
+        meta["rejected_slug"] = slug
+
+    # Also parse any explicit wrong slug from notes
+    import re
+
+    for m in re.finditer(r"linkedin\.com/in/([a-z0-9\-_%]{2,80})", notes, re.I):
+        reject.append(m.group(1).strip("/").lower())
+
+    print(
+        f"  [feedback] wrong LinkedIn flagged — rediscovering for {name!r} "
+        f"(reject={reject})",
+        flush=True,
+    )
+    new_url = rediscover_linkedin_via_gemini(
+        name=name,
+        company=company,
+        university=university,
+        place=place,
+        notes=notes,
+        reject_slugs=reject,
+    )
+    if new_url:
+        meta["rediscovered"] = True
+        meta["new_linkedin_url"] = new_url
+        print(f"  [feedback] rediscovered LinkedIn → {new_url}", flush=True)
+        return normalize_linkedin_url(new_url) or new_url, meta
+
+    # Clear bad lock so next research searches fresh with name+extras
+    print("  [feedback] LinkedIn rediscovery miss — clearing lock for name search", flush=True)
+    return None, meta
+
+
+def rediscover_linkedin_via_gemini(
+    *,
+    name: str,
+    company: Optional[str] = None,
+    university: Optional[str] = None,
+    place: Optional[str] = None,
+    notes: Optional[str] = None,
+    reject_slugs: Optional[List[str]] = None,
+) -> Optional[str]:
+    """Google Search via Gemini: name + extras + 'linkedin' → exact profile URL."""
+    import json
+    import os
+    import re
+
+    from google import genai
+    from google.genai import types
+
+    from gemini_retry import generate_with_retry
+    from identity_lock import linkedin_slug, normalize_linkedin_url
+
+    api_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
+    if not api_key or not (name or "").strip():
+        return None
+
+    extras = []
+    if company:
+        extras.append(f'company "{company}"')
+    if university:
+        extras.append(f'university "{university}"')
+    if place:
+        extras.append(f'location "{place}"')
+    if notes:
+        extras.append(f"user correction notes: {notes[:240]}")
+    reject = [s for s in (reject_slugs or []) if s]
+    reject_line = (
+        f"Do NOT return these wrong LinkedIn slugs: {', '.join(reject)}."
+        if reject
+        else ""
+    )
+    prompt = f"""Use Google Search to find the correct LinkedIn profile for this person.
+
+Name: {name}
+Hints: {'; '.join(extras) if extras else '(none)'}
+{reject_line}
+
+Search queries like: "{name}" LinkedIn, "{name}" {company or university or ''} site:linkedin.com/in
+
+Return ONLY strict JSON:
+{{"linkedin_url": string or null, "confidence": "high"|"medium"|"low", "reason": string}}
+
+Rules:
+- linkedin_url must be https://www.linkedin.com/in/... for THIS person
+- Prefer profiles whose headline matches the hints
+- null if unsure — never invent a slug
+"""
+    try:
+        client = genai.Client(api_key=api_key)
+        model = os.environ.get("GEMINI_MODEL") or "gemini-2.5-flash"
+        resp = generate_with_retry(
+            client,
+            model=model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+                temperature=0.1,
+            ),
+        )
+        text = (resp.text or "").strip()
+        # Extract JSON object
+        m = re.search(r"\{[\s\S]*\}", text)
+        if not m:
+            return None
+        data = json.loads(m.group(0))
+        url = normalize_linkedin_url(data.get("linkedin_url"))
+        if not url:
+            return None
+        slug = (linkedin_slug(url) or "").lower()
+        if slug and slug in {s.lower() for s in reject}:
+            return None
+        conf = (data.get("confidence") or "").lower()
+        if conf == "low":
+            return None
+        return url
+    except Exception as exc:
+        print(f"  [feedback] LinkedIn rediscovery error: {exc}", flush=True)
+        return None
 
 
 def _dual_write_supabase(row: dict[str, Any]) -> None:

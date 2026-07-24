@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import {
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -8,7 +9,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { api } from "../lib/api";
+import { api, getLastUserPhoto } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useTheme } from "../lib/theme-context";
 import { fonts, space } from "../lib/theme";
@@ -31,11 +32,15 @@ export function AuthModal({ visible, onClose, initialMode = "login", onSuccess }
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
 
   React.useEffect(() => {
     if (visible) {
       setMode(initialMode);
       setError("");
+      getLastUserPhoto()
+        .then((u) => setPhotoUrl(u))
+        .catch(() => setPhotoUrl(null));
     }
   }, [visible, initialMode]);
 
@@ -50,7 +55,6 @@ export function AuthModal({ visible, onClose, initialMode = "login", onSuccess }
         if (!name.trim() || password.length < 6) {
           throw new Error("Name and password (6+ chars) required.");
         }
-        // Minimal signup — full research signup stays on dedicated flow
         const res = await api.signup({
           name: name.trim(),
           email: email.trim(),
@@ -76,6 +80,9 @@ export function AuthModal({ visible, onClose, initialMode = "login", onSuccess }
             style={[styles.card, { backgroundColor: colors.chalk, borderColor: colors.line }]}
             onPress={(e) => e.stopPropagation()}
           >
+            {mode === "login" && photoUrl ? (
+              <Image source={{ uri: photoUrl }} style={styles.avatar} />
+            ) : null}
             <Text style={[styles.title, { color: colors.ink }]}>
               {mode === "login" ? "Sign in" : "Quick account"}
             </Text>
@@ -97,20 +104,18 @@ export function AuthModal({ visible, onClose, initialMode = "login", onSuccess }
             <Field label="Password" secureTextEntry value={password} onChangeText={setPassword} />
             {error ? <Text style={{ color: colors.danger, marginBottom: 8 }}>{error}</Text> : null}
             <Button
-              title={mode === "login" ? "Sign in" : "Create"}
+              title={loading ? "…" : mode === "login" ? "Sign in" : "Create"}
               onPress={submit}
               loading={loading}
-              variant="ember"
             />
             <Pressable
               onPress={() => setMode(mode === "login" ? "signup" : "login")}
-              style={{ marginTop: 14 }}
+              style={{ marginTop: 12 }}
             >
-              <Text style={{ fontFamily: fonts.bodyMed, color: colors.leaf, textAlign: "center" }}>
+              <Text style={{ fontFamily: fonts.bodyMed, color: colors.ember, textAlign: "center" }}>
                 {mode === "login" ? "Need an account? Quick signup" : "Have an account? Sign in"}
               </Text>
             </Pressable>
-            <Button title="Close" variant="ghost" onPress={onClose} style={{ marginTop: 8 }} />
           </Pressable>
         </KeyboardAvoidingView>
       </Pressable>
@@ -131,6 +136,14 @@ const styles = StyleSheet.create({
     maxWidth: 420,
     alignSelf: "center",
     width: "100%",
+  },
+  avatar: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignSelf: "center",
+    marginBottom: 12,
+    backgroundColor: "#ddd",
   },
   title: { fontFamily: fonts.display, fontSize: 28, marginBottom: 6 },
   sub: { fontFamily: fonts.body, fontSize: 14, marginBottom: space.md, lineHeight: 20 },

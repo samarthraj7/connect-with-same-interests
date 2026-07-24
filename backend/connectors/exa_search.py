@@ -17,6 +17,7 @@ def find_linkedin_people_by_name(
     *,
     company: Optional[str] = None,
     university: Optional[str] = None,
+    distinguishable_factor: Optional[str] = None,
     max_people: int = 8,
 ) -> dict:
     """LinkedIn people discovery via Exa (linkedin.com/in/… results).
@@ -24,6 +25,8 @@ def find_linkedin_people_by_name(
     When company/university are provided, those queries run first so Google-like
     disambiguation ("Name" "University of Southern California") actually affects
     who shows up — not only a post-hoc soft filter on a name-only shortlist.
+    Soft hints (robotics, founder, startup…) boost discovery + ranking without
+    hard-filtering out other exact-name matches.
     """
     api_key = os.environ.get("EXA_API_KEY")
     if not api_key:
@@ -35,6 +38,7 @@ def find_linkedin_people_by_name(
 
     company = (company or "").strip() or None
     university = (university or "").strip() or None
+    hint = (distinguishable_factor or "").strip() or None
 
     headers = {"x-api-key": api_key, "Content-Type": "application/json"}
     queries: List[str] = []
@@ -62,6 +66,15 @@ def find_linkedin_people_by_name(
             if alias.lower() == company.lower():
                 continue
             queries.append(f'"{name}" "{alias}" site:linkedin.com/in')
+    # Soft distinguishable factor: bias search toward interests / role vibes
+    if hint:
+        for token in _hint_query_phrases(hint)[:4]:
+            queries.extend(
+                [
+                    f'"{name}" "{token}" site:linkedin.com/in',
+                    f'"{name}" {token} LinkedIn',
+                ]
+            )
     # Always finish with name-only so we still have a fallback shortlist
     queries.extend(
         [
@@ -82,13 +95,14 @@ def find_linkedin_people_by_name(
         ordered_queries.append(q)
 
     print(
-        f"[exa linkedin-people] START name={name!r} company={company!r} university={university!r}",
+        f"[exa linkedin-people] START name={name!r} company={company!r} "
+        f"university={university!r} hint={hint!r}",
         flush=True,
     )
     seen: set = set()
     raw_hits: list = []
-    # Prefer more hits when filters are present — common names need room for the right one
-    target = max_people * 3 if (company or university) else max_people * 2
+    # Prefer more hits when filters/hints are present — common names need room
+    target = max_people * 3 if (company or university or hint) else max_people * 2
 
     for q in ordered_queries:
         if len(raw_hits) >= target:
@@ -116,13 +130,18 @@ def find_linkedin_people_by_name(
         cand = _hit_to_candidate(h, fallback_name=name)
         score = _name_overlap_score(name, cand.get("name") or "", h)
         score += _org_context_boost(h, cand, company=company, university=university)
+        score += _hint_context_boost(h, cand, hint)
         # Prefer hits that came from a filtered query
         qtext = (h.get("query") or "").lower()
         if university and any(a.lower() in qtext for a in _org_aliases(university)):
             score += 0.2
         if company and any(a.lower() in qtext for a in _org_aliases(company)):
             score += 0.15
-        cand["_score"] = min(score, 1.5)
+        if hint and any(t.lower() in qtext for t in _hint_query_phrases(hint)):
+            score += 0.12
+        cand["_score"] = min(score, 1.6)
+        if hint:
+            cand["_hint_score"] = _hint_match_score(cand, hint, hit=h)
         scored.append(cand)
         print(
             f"    score={cand['_score']:.2f} name={cand.get('name')!r} "
@@ -130,9 +149,9 @@ def find_linkedin_people_by_name(
             flush=True,
         )
 
-    ranked = sorted(scored, key=lambda x: -x["_score"])
+    ranked = sorted(scored, key=lambda x: (-x["_score"], -float(x.get("_hint_score") or 0)))
     keep_n = max(max_people * 2, max_people)
-    if company or university:
+    if company or university or hint:
         keep_n = max(keep_n, 16)
     picked = [c for c in ranked if c["_score"] >= 0.25][:keep_n]
     if not picked and ranked:
@@ -144,6 +163,12 @@ def find_linkedin_people_by_name(
         others = [c for c in picked if c not in matched]
         if matched:
             picked = matched + others
+    # Soft: hint-matching exact-ish rows float up without dropping others
+    if hint:
+        hinted = [c for c in picked if float(c.get("_hint_score") or 0) > 0]
+        rest = [c for c in picked if c not in hinted]
+        if hinted:
+            picked = hinted + rest
 
     print(f"[exa linkedin-people] DONE count={len(picked)} (from {len(raw_hits)} hits)", flush=True)
     return {
@@ -153,6 +178,7 @@ def find_linkedin_people_by_name(
         "filter_matched": sum(
             1 for c in picked if _candidate_matches_org(c, company=company, university=university)
         ),
+        "hint_matched": sum(1 for c in picked if float(c.get("_hint_score") or 0) > 0) if hint else 0,
     }
 
 
@@ -243,6 +269,62 @@ def _org_context_boost(
                 boost += 0.3
                 break
     return boost
+
+
+def _hint_query_phrases(hint: Optional[str]) -> List[str]:
+    """Turn 'robotics, founder, startup' into searchable phrases."""
+    raw = (hint or "").strip()
+    if not raw:
+        return []
+    parts = re.split(r"[,;/|]+|\s{2,}", raw)
+    out: List[str] = []
+    seen = set()
+    for p in parts:
+        p = re.sub(r"\s+", " ", p.strip())
+        if len(p) < 2:
+            continue
+        key = p.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(p)
+    if not out and raw:
+        out.append(raw)
+    # Also keep meaningful single tokens from the whole string
+    stop = {"and", "the", "or", "a", "an", "into", "for", "with", "who", "is", "are"}
+    for tok in re.findall(r"[A-Za-z][A-Za-z0-9&.-]{2,}", raw):
+        if tok.lower() in stop:
+            continue
+        if tok.lower() not in seen:
+            seen.add(tok.lower())
+            out.append(tok)
+    return out[:8]
+
+
+def _hint_context_boost(hit: Optional[dict], cand: Optional[dict], hint: Optional[str]) -> float:
+    if not hint:
+        return 0.0
+    blob = _blob_for_candidate(hit, cand)
+    boost = 0.0
+    for phrase in _hint_query_phrases(hint):
+        pl = phrase.lower()
+        if pl in blob:
+            boost += 0.35 if " " in pl or len(pl) > 6 else 0.22
+    return min(boost, 0.7)
+
+
+def _hint_match_score(cand: Optional[dict], hint: Optional[str], *, hit: Optional[dict] = None) -> float:
+    """0..1-ish score for how well a candidate card matches the soft hint."""
+    if not hint or not cand:
+        return 0.0
+    blob = _blob_for_candidate(hit, cand)
+    phrases = _hint_query_phrases(hint)
+    if not phrases:
+        return 0.0
+    hits = sum(1 for p in phrases if p.lower() in blob)
+    if not hits:
+        return 0.0
+    return min(1.0, hits / max(1, min(3, len(phrases))) + (0.15 if hits >= 2 else 0))
 
 
 def _candidate_matches_org(

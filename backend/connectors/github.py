@@ -69,7 +69,43 @@ def search_github(
         resp.raise_for_status()
         items = resp.json().get("items", [])
         if not items:
-            return {"status": "not_found", "candidates": []}
+            # Try username variants (samarth_rajendra, sam_rthraj, …) — keep identity_resolve path
+            from handle_variants import username_variants
+            from identity_lock import linkedin_slug
+
+            slug = linkedin_slug(linkedin_url) if linkedin_url else None
+            variant_hits = []
+            for guess in username_variants(name, linkedin_slug=slug, limit=8):
+                candidate = _fetch_user(guess)
+                if not candidate:
+                    continue
+                if candidate.get("name") and not _name_matches(candidate.get("name"), name):
+                    continue
+                packed = _pack_user(guess, candidate)
+                packed["discovery"] = "username_variant"
+                variant_hits.append(packed)
+                print(f"  [github] variant hit @{guess}", flush=True)
+            if not variant_hits:
+                return {"status": "not_found", "candidates": []}
+            if linkedin_url:
+                return _resolve_among_candidates(
+                    variant_hits,
+                    name=name,
+                    company=company,
+                    linkedin_url=linkedin_url,
+                )
+            top = variant_hits[0]
+            top["status"] = "ambiguous"
+            top["reason"] = "username_variant_without_linkedin_lock"
+            top["candidates"] = [
+                {
+                    "login": (c.get("profile") or {}).get("login"),
+                    "html_url": (c.get("profile") or {}).get("html_url"),
+                    "name": (c.get("profile") or {}).get("name"),
+                }
+                for c in variant_hits
+            ]
+            return top
 
         name_matched = []
         for item in items:
@@ -79,11 +115,26 @@ def search_github(
                 name_matched.append(packed)
 
         if not name_matched:
-            return {
-                "status": "not_found",
-                "reason": "no candidate's display name matched closely enough",
-                "candidates": [i["login"] for i in items],
-            }
+            from handle_variants import username_variants
+            from identity_lock import linkedin_slug
+
+            slug = linkedin_slug(linkedin_url) if linkedin_url else None
+            for guess in username_variants(name, linkedin_slug=slug, limit=8):
+                candidate = _fetch_user(guess)
+                if not candidate:
+                    continue
+                if candidate.get("name") and not _name_matches(candidate.get("name"), name):
+                    continue
+                packed = _pack_user(guess, candidate)
+                packed["discovery"] = "username_variant"
+                name_matched.append(packed)
+                print(f"  [github] variant after name-search @{guess}", flush=True)
+            if not name_matched:
+                return {
+                    "status": "not_found",
+                    "reason": "no candidate's display name matched closely enough",
+                    "candidates": [i["login"] for i in items],
+                }
 
         # With LinkedIn: score all name-matched candidates; never auto-merge on name alone
         if linkedin_url:
@@ -139,7 +190,12 @@ def _pack_user(username: str, user: dict) -> dict:
         result["organizations"] = graph.get("organizations", [])
         result["contributions"] = graph.get("contributions")
     else:
-        result["social_accounts_note"] = "GITHUB_TOKEN not set — GraphQL social graph skipped"
+        token = os.environ.get("GITHUB_TOKEN")
+        result["social_accounts_note"] = (
+            "GITHUB_TOKEN not set — GraphQL social graph skipped"
+            if not token
+            else "GraphQL returned no user data (check token scopes / rate limit)"
+        )
     return result
 
 
@@ -264,6 +320,7 @@ def _fetch_user(username: str) -> Optional[dict]:
         "public_repos": data.get("public_repos"),
         "followers": data.get("followers"),
         "html_url": data.get("html_url"),
+        "avatar_url": data.get("avatar_url"),
         "created_at": data.get("created_at"),
     }
 
@@ -294,23 +351,33 @@ def _fetch_graphql(username: str) -> Optional[dict]:
     """GraphQL requires auth even for public data — skip cleanly if no token."""
     token = os.environ.get("GITHUB_TOKEN")
     if not token:
+        print("  [github] GraphQL skipped — GITHUB_TOKEN not set", flush=True)
         return None
 
     resp = requests.post(
         GITHUB_GRAPHQL_API,
         json={"query": GRAPHQL_USER_QUERY, "variables": {"login": username}},
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=10,
+        headers={**_headers(), "Authorization": f"Bearer {token}"},
+        timeout=15,
     )
     if resp.status_code != 200:
+        print(
+            f"  [github] GraphQL HTTP {resp.status_code} for {username!r}: {(resp.text or '')[:200]}",
+            flush=True,
+        )
         return None
 
-    user = (resp.json().get("data") or {}).get("user")
+    payload = resp.json() or {}
+    errors = payload.get("errors")
+    if errors:
+        print(f"  [github] GraphQL errors for {username!r}: {errors}", flush=True)
+    user = (payload.get("data") or {}).get("user")
     if not user:
+        print(f"  [github] GraphQL user null for {username!r}", flush=True)
         return None
 
     contributions = user.get("contributionsCollection", {})
-    return {
+    result = {
         "social_accounts": [
             {"provider": n.get("provider"), "handle": n.get("displayName"), "url": n.get("url")}
             for n in (user.get("socialAccounts") or {}).get("nodes", [])
@@ -322,5 +389,14 @@ def _fetch_graphql(username: str) -> Optional[dict]:
             "total_last_year": (contributions.get("contributionCalendar") or {}).get("totalContributions"),
             "total_commits": contributions.get("totalCommitContributions"),
             "total_pull_requests": contributions.get("totalPullRequestContributions"),
+            "total": (contributions.get("contributionCalendar") or {}).get("totalContributions"),
+            "commits": contributions.get("totalCommitContributions"),
+            "pull_requests": contributions.get("totalPullRequestContributions"),
         },
     }
+    print(
+        f"  [github] GraphQL ok @{username} socials={len(result['social_accounts'])} "
+        f"orgs={len(result['organizations'])} contrib={result['contributions'].get('total')}",
+        flush=True,
+    )
+    return result

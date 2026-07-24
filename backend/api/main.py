@@ -84,6 +84,7 @@ class SignupBody(BaseModel):
     draft_id: Optional[str] = None
     # From POST /auth/signup/otp/verify
     email_verified_token: Optional[str] = None
+    photo_url: Optional[str] = None
 
 
 class SignupOtpSendBody(BaseModel):
@@ -184,6 +185,8 @@ class CandidatesBody(BaseModel):
     company: Optional[str] = None
     university: Optional[str] = None
     linkedin_url: Optional[str] = None
+    # Soft disambiguator: interests / role vibes (robotics, founder, startup…)
+    distinguishable_factor: Optional[str] = None
 
 
 class JournalEntryBody(BaseModel):
@@ -355,7 +358,19 @@ def signup(body: SignupBody):
         },
         "profile_source": "signup_seed",
         "research_status": "pending" if want_research else ("ok" if draft else "skipped"),
+        "photo_url": (body.photo_url or "").strip() or None,
     }
+
+    # Prefer photo from research draft / Find Me pick
+    if not seed.get("photo_url") and draft:
+        summ = draft.get("summary") or {}
+        sources = draft.get("all_sources") or draft.get("sources") or {}
+        seed["photo_url"] = (
+            summ.get("photo_url")
+            or (sources.get("apollo") or {}).get("photo_url")
+            or (sources.get("linkedin_public") or {}).get("photo_url")
+            or (sources.get("gemini_search") or {}).get("photo_url")
+        )
 
     if draft and draft.get("summary"):
         researched = profile_from_research(
@@ -391,6 +406,17 @@ def signup(body: SignupBody):
             seed["interests"] = _clean_list(body.interests)
         if _clean_list(body.sports):
             seed["sports"] = _clean_list(body.sports)
+        # Keep Find Me / research photo on the profile for login + home
+        photo = (body.photo_url or "").strip() or seed.get("photo_url")
+        if not photo:
+            sources = draft.get("all_sources") or draft.get("sources") or {}
+            photo = (
+                (sources.get("apollo") or {}).get("photo_url")
+                or (sources.get("linkedin_public") or {}).get("photo_url")
+                or (sources.get("gemini_search") or {}).get("photo_url")
+            )
+        if photo:
+            seed["photo_url"] = photo
 
 
     print(f"\n[signup] creating account for {email} ({name})")
@@ -852,6 +878,22 @@ def research_feedback(body: ResearchFeedbackBody, user=Depends(require_user)):
             wrong_categories=body.wrong_categories,
             briefing_snapshot=_public_summary(summary) if isinstance(summary, dict) else None,
         )
+        # If notes say LinkedIn is wrong → Gemini rediscover with name + extras
+        try:
+            from research_feedback import apply_linkedin_correction_from_notes
+
+            linkedin_url, li_meta = apply_linkedin_correction_from_notes(
+                name=name,
+                company=company,
+                university=university,
+                linkedin_url=linkedin_url,
+                wrong_notes=body.wrong_notes,
+            )
+            if li_meta.get("cleared") or li_meta.get("rediscovered"):
+                print(f"  [feedback] LinkedIn correction meta={li_meta}", flush=True)
+        except Exception as exc:
+            print(f"  [feedback] LinkedIn correction skipped: {exc}", flush=True)
+
         try:
             delete_draft(body.draft_id)
         except Exception:
@@ -1410,6 +1452,7 @@ def _candidates_start(body: CandidatesBody, *, user_id: Optional[str]) -> dict:
                 company=(body.company or "").strip() or None,
                 university=(body.university or "").strip() or None,
                 linkedin_url=(body.linkedin_url or "").strip() or None,
+                distinguishable_factor=(body.distinguishable_factor or "").strip() or None,
                 on_update=on_update,
             )
             filtered = _finalize_candidates_response(body, result)
@@ -1504,6 +1547,19 @@ def _finalize_candidates_response(body: CandidatesBody, result: dict) -> dict:
             ]
             if filtered:
                 out_rows = filtered
+        # Soft rank by distinguishable factor (robotics, founder…) — never drop non-matches
+        hint = (body.distinguishable_factor or "").strip() or None
+        if hint and out_rows:
+            from connectors.exa_search import _hint_match_score
+
+            out_rows = sorted(
+                out_rows,
+                key=lambda c: -(
+                    c.get("_hint_score")
+                    if c.get("_hint_score") is not None
+                    else _hint_match_score(c, hint)
+                ),
+            )
         return out_rows
 
     exact = _apply_filters(list(result.get("exact") or []))
@@ -1697,6 +1753,22 @@ def public_research_feedback(body: PublicResearchFeedbackBody):
         briefing_snapshot=_public_summary(draft.get("summary") or {}),
     )
     try:
+        from research_feedback import apply_linkedin_correction_from_notes
+
+        linkedin_url, li_meta = apply_linkedin_correction_from_notes(
+            name=name,
+            company=company,
+            university=university,
+            place=place,
+            linkedin_url=linkedin_url,
+            wrong_notes=body.wrong_notes,
+        )
+        if li_meta.get("cleared") or li_meta.get("rediscovered"):
+            print(f"  [public-feedback] LinkedIn correction meta={li_meta}", flush=True)
+    except Exception as exc:
+        print(f"  [public-feedback] LinkedIn correction skipped: {exc}", flush=True)
+
+    try:
         delete_draft(body.draft_id)
     except Exception:
         pass
@@ -1706,6 +1778,7 @@ def public_research_feedback(body: PublicResearchFeedbackBody):
             "status": "ok",
             "rating": "bad",
             "retried": False,
+            "linkedin_url": linkedin_url,
             "message": "Notes saved. Tap research again when ready.",
         }
 
@@ -1743,6 +1816,7 @@ def _candidates_impl(body: CandidatesBody):
         company=(body.company or "").strip() or None,
         university=(body.university or "").strip() or None,
         linkedin_url=(body.linkedin_url or "").strip() or None,
+        distinguishable_factor=(body.distinguishable_factor or "").strip() or None,
     )
     out = _finalize_candidates_response(body, result)
     print(

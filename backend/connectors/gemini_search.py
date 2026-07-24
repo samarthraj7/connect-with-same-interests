@@ -156,6 +156,7 @@ def _candidate_hint_block(
     company: Optional[str] = None,
     university: Optional[str] = None,
     linkedin_url: Optional[str] = None,
+    distinguishable_factor: Optional[str] = None,
 ) -> str:
     bits = []
     if university:
@@ -168,6 +169,13 @@ def _candidate_hint_block(
         bits.append(
             f'Prioritize people who work(ed) at "{company}". '
             f'Search "{company}" together with the name on LinkedIn and the open web.'
+        )
+    if distinguishable_factor:
+        bits.append(
+            f'Prefer people whose headline, about, or public work mentions: '
+            f'"{distinguishable_factor}" (e.g. robotics, founder, startup, AI). '
+            f'This is a soft clue — still list other exact-name matches, but rank hint matches first. '
+            f'Search: name + those keywords + LinkedIn.'
         )
     if linkedin_url:
         bits.append(f"If possible, confirm or locate this LinkedIn profile: {linkedin_url}")
@@ -183,12 +191,16 @@ def _grounded_search_notes(
     company: Optional[str] = None,
     university: Optional[str] = None,
     linkedin_url: Optional[str] = None,
+    distinguishable_factor: Optional[str] = None,
 ) -> Tuple[str, object]:
     """Phase 1: Google Search → prose notes. Retries once if Gemini returns empty parts."""
     prompt = CANDIDATE_SEARCH_PROMPT.format(
         name=name,
         hint_block=_candidate_hint_block(
-            company=company, university=university, linkedin_url=linkedin_url
+            company=company,
+            university=university,
+            linkedin_url=linkedin_url,
+            distinguishable_factor=distinguishable_factor,
         ),
     )
     last_resp = None
@@ -239,12 +251,14 @@ def find_candidates(
     company: Optional[str] = None,
     university: Optional[str] = None,
     linkedin_url: Optional[str] = None,
+    distinguishable_factor: Optional[str] = None,
     enrich_photos: bool = True,
     on_update: Optional[Any] = None,
 ) -> dict:
     """Disambiguate a name before the expensive multi-angle deep dive.
 
     Primary path: Exa LinkedIn people search (biased by company/university when set).
+    Soft distinguishable_factor (robotics, founder…) biases queries + ranking only.
     When filters are present, also run Gemini Google Search and merge — filters must
     affect discovery, not only a soft post-filter on a name-only shortlist.
     If linkedin_url is provided, return that profile as the top candidate.
@@ -254,15 +268,17 @@ def find_candidates(
     company = (company or "").strip() or None
     university = (university or "").strip() or None
     linkedin_url = (linkedin_url or "").strip() or None
+    distinguishable_factor = (distinguishable_factor or "").strip() or None
     print(
         f"[find_candidates] START name={name!r} company={company!r} "
-        f"university={university!r} linkedin={linkedin_url!r} model={MODEL}",
+        f"university={university!r} hint={distinguishable_factor!r} "
+        f"linkedin={linkedin_url!r} model={MODEL}",
         flush=True,
     )
     warning = None
     candidates: list = []
     discovery = "none"
-    has_filters = bool(company or university or linkedin_url)
+    has_filters = bool(company or university or linkedin_url or distinguishable_factor)
 
     def _emit(partial: dict) -> None:
         if not on_update:
@@ -306,6 +322,7 @@ def find_candidates(
             name,
             company=company,
             university=university,
+            distinguishable_factor=distinguishable_factor,
             max_people=12 if has_filters else 8,
         )
         print(
@@ -345,6 +362,7 @@ def find_candidates(
                     company=company,
                     university=university,
                     linkedin_url=linkedin_url,
+                    distinguishable_factor=distinguishable_factor,
                 )
             except (errors.ClientError, errors.ServerError) as exc:
                 print(f"[find_candidates] Gemini API ERROR: {exc}", flush=True)
@@ -372,12 +390,16 @@ def find_candidates(
                 if gem_cands:
                     for c in gem_cands:
                         try:
-                            from connectors.exa_search import _candidate_matches_org
+                            from connectors.exa_search import _candidate_matches_org, _hint_match_score
 
                             if _candidate_matches_org(c, company=company, university=university):
                                 c["_score"] = max(float(c.get("_score") or 0.5), 0.95)
                             else:
                                 c["_score"] = float(c.get("_score") or 0.4)
+                            hs = _hint_match_score(c, distinguishable_factor)
+                            if hs:
+                                c["_hint_score"] = hs
+                                c["_score"] = float(c["_score"]) + min(0.25, hs * 0.25)
                         except Exception:
                             c["_score"] = float(c.get("_score") or 0.4)
                     candidates = _merge_candidates(candidates, gem_cands)
@@ -440,6 +462,29 @@ def find_candidates(
         except Exception as exc:
             print(f"[find_candidates] org prefer skipped: {exc}", flush=True)
 
+    # Soft: float hint-matching people without dropping others
+    if distinguishable_factor and candidates:
+        try:
+            from connectors.exa_search import _hint_match_score
+
+            for c in candidates:
+                if isinstance(c, dict) and c.get("_hint_score") is None:
+                    c["_hint_score"] = _hint_match_score(c, distinguishable_factor)
+            candidates = sorted(
+                candidates,
+                key=lambda c: (
+                    -float((c or {}).get("_hint_score") or 0),
+                    -float((c or {}).get("_score") or 0),
+                ),
+            )
+            hinted_n = sum(1 for c in candidates if float((c or {}).get("_hint_score") or 0) > 0)
+            print(
+                f"[find_candidates] hint prefer {hinted_n} / {len(candidates)} for {distinguishable_factor!r}",
+                flush=True,
+            )
+        except Exception as exc:
+            print(f"[find_candidates] hint prefer skipped: {exc}", flush=True)
+
     print(f"[find_candidates] discovery={discovery} count={len(candidates)}", flush=True)
     for i, c in enumerate(candidates):
         print(
@@ -459,6 +504,19 @@ def find_candidates(
     else:
         to_enrich = [{k: v for k, v in c.items() if k != "_score"} for c in candidates if isinstance(c, dict)]
         match_mode = "probable_only" if to_enrich else "none"
+
+    # Second pass: verify LinkedIn URL vs name/headline; Google-rediscover on mismatch
+    if to_enrich:
+        try:
+            from linkedin_verify import verify_candidates_linkedin
+
+            print(
+                f"[find_candidates] verifying LinkedIn identity on {len(to_enrich)} cards…",
+                flush=True,
+            )
+            to_enrich = verify_candidates_linkedin(to_enrich, query_name=name)
+        except Exception as exc:
+            print(f"[find_candidates] linkedin verify skipped: {exc}", flush=True)
 
     skip_enrich = os.environ.get("CANDIDATE_PHOTO_ENRICH", "").strip().lower() in ("0", "false", "no")
     want_enrich = enrich_photos and not skip_enrich
@@ -604,7 +662,11 @@ def _enrich_one_candidate_photo(c: dict) -> dict:
     out = dict(c)
     name = (out.get("name") or "").strip()
     company = (out.get("company") or "").strip() or None
-    linkedin = (out.get("linkedin_url") or "").strip() or None
+    # Lock discovery LinkedIn — never let Apollo/EL swap in a different same-name person
+    locked_li = (out.get("linkedin_url") or "").strip() or None
+    rejected_li = bool(out.get("linkedin_url_rejected"))
+    # After verify rejected a bad LI, stay unlocked for rediscovery only — never refill here
+    linkedin = locked_li
     role = (out.get("role") or "").strip() or None
     location = (out.get("location") or "").strip() or None
     print(f"  [enrich] Apollo+EL {name!r} company={company!r} li={bool(linkedin)}", flush=True)
@@ -620,9 +682,16 @@ def _enrich_one_candidate_photo(c: dict) -> dict:
                 timeout=APOLLO_TIMEOUT,
             )
             if hit.get("status") == "ok":
-                if hit.get("linkedin_url") and not out.get("linkedin_url"):
-                    out["linkedin_url"] = hit["linkedin_url"]
-                    linkedin = hit["linkedin_url"]
+                apollo_li = (hit.get("linkedin_url") or "").strip() or None
+                if apollo_li and not locked_li and not rejected_li:
+                    out["linkedin_url"] = apollo_li
+                    linkedin = apollo_li
+                elif apollo_li and locked_li and apollo_li.rstrip("/").lower() != locked_li.rstrip("/").lower():
+                    # Keep Find Me / Exa URL — Apollo matched a different same-name profile
+                    print(
+                        f"  [enrich] keeping locked LI (apollo suggested different slug)",
+                        flush=True,
+                    )
                 if hit.get("title") and not out.get("role"):
                     out["role"] = hit["title"]
                     role = hit["title"]
@@ -639,8 +708,10 @@ def _enrich_one_candidate_photo(c: dict) -> dict:
                     (out.get("photo_url") or "").startswith("http")
                     and "ui-avatars.com" not in (out.get("photo_url") or "")
                 ):
-                    out["photo_url"] = hit["photo_url"]
-                    out["photo_source"] = "licensed"
+                    # Only take Apollo photo when LI matches locked identity (or no lock)
+                    if not locked_li or not apollo_li or apollo_li.rstrip("/").lower() == locked_li.rstrip("/").lower():
+                        out["photo_url"] = hit["photo_url"]
+                        out["photo_source"] = "licensed"
         except Exception as exc:
             print(f"  [enrich] apollo exception: {exc}", flush=True)
 
@@ -664,21 +735,26 @@ def _enrich_one_candidate_photo(c: dict) -> dict:
                 location=location,
                 timeout=EL_TIMEOUT,
             )
-            if el.get("linkedin_url") and not out.get("linkedin_url"):
-                out["linkedin_url"] = el["linkedin_url"]
-                linkedin = el["linkedin_url"]
+            el_li = (el.get("linkedin_url") or "").strip() or None
+            if el_li and not locked_li and not rejected_li:
+                out["linkedin_url"] = el_li
+                linkedin = el_li
             if el.get("title") and not out.get("role"):
                 out["role"] = el["title"]
             if (el.get("organization") or {}).get("name") and not out.get("company"):
                 out["company"] = el["organization"]["name"]
             if el.get("status") == "ok" and el.get("photo_url") and not existing:
-                out["photo_url"] = el["photo_url"]
-                out["photo_source"] = "licensed"
-                return out
-            if existing:
-                return out
+                if not locked_li or not el_li or el_li.rstrip("/").lower() == locked_li.rstrip("/").lower():
+                    out["photo_url"] = el["photo_url"]
+                    out["photo_source"] = "enrichlayer"
+                    existing = el["photo_url"]
     except Exception as exc:
         print(f"  [enrich] enrichlayer exception: {exc}", flush=True)
+
+    # Hard lock: discovery LinkedIn always wins on the Find Me card
+    if locked_li:
+        out["linkedin_url"] = locked_li
+        out["linkedin_locked"] = True
 
     if existing:
         return out

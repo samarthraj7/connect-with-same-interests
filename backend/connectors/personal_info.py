@@ -65,9 +65,39 @@ _MILESTONES = [
         "search_bias": (
             'hobby OR hobbies OR "spare time" OR weekend OR "outside of work" OR '
             "sports OR soccer OR cricket OR tennis OR golf OR running OR hiking OR "
-            "music OR cooking OR travel interview podcast bio"
+            "music OR cooking OR travel interview podcast bio Instagram"
         ),
         "fields": ["hobbies", "sports_interests", "weekend_preferences"],
+    },
+    {
+        "key": "side_hustles",
+        "question": (
+            "Does {name} have any side projects, startups, consulting, newsletters, "
+            "YouTube/creators brands, or side hustles beyond their main job?"
+        ),
+        "milestone": "side hustles, indie projects, creator brands, consulting (non-LinkedIn preferred)",
+        "search_bias": (
+            '"side project" OR "side hustle" OR newsletter OR Substack OR "I built" OR '
+            "founder OR co-founder OR indie OR bootstrapped OR podcast host OR "
+            "YouTube OR freelance OR consulting portfolio -site:linkedin.com"
+        ),
+        "fields": ["side_hustles"],
+    },
+    {
+        "key": "interesting_facts",
+        "question": (
+            "What unique, conversation-worthy public facts about {name} stand out "
+            "(unusual hobbies, awards, viral posts, quirky interests, competitions, "
+            "volunteer causes) from Instagram, interviews, blogs, or personal sites — "
+            "not generic LinkedIn headlines?"
+        ),
+        "milestone": "interesting/unique public facts for conversation openers",
+        "search_bias": (
+            "Instagram OR interview OR podcast OR blog OR \"fun fact\" OR award OR "
+            "volunteer OR marathon OR chess OR photography OR music OR art OR "
+            "competition OR \"outside of work\" personal site -site:linkedin.com/in"
+        ),
+        "fields": ["interesting_facts"],
     },
     {
         "key": "spouse",
@@ -177,6 +207,8 @@ Respond with strict JSON only, no markdown fences:
   "hobbies": [string],
   "sports_interests": [string],
   "weekend_preferences": [string],
+  "side_hustles": [string],
+  "interesting_facts": [string],
   "family_background": [string],
   "spouse": string or null,
   "children": [{{"name": string or null, "school": string or null, "company": string or null, "note": string or null}}],
@@ -282,6 +314,8 @@ def _run_milestone(client, name: str, context: str, milestone: dict) -> dict:
         or parsed.get("hobbies")
         or parsed.get("sports_interests")
         or parsed.get("weekend_preferences")
+        or parsed.get("side_hustles")
+        or parsed.get("interesting_facts")
         or parsed.get("family_background")
         or parsed.get("spouse")
         or parsed.get("children")
@@ -319,6 +353,8 @@ def _merge(milestone_results: dict) -> dict:
         "hobbies": _dedupe_list(r.get("hobbies") for r in ordered),
         "sports_interests": _dedupe_list(r.get("sports_interests") for r in ordered),
         "weekend_preferences": _dedupe_list(r.get("weekend_preferences") for r in ordered),
+        "side_hustles": _dedupe_list(r.get("side_hustles") for r in ordered),
+        "interesting_facts": _dedupe_list(r.get("interesting_facts") for r in ordered),
         "family_background": _dedupe_list(r.get("family_background") for r in ordered),
         "spouse": _first_non_null(ordered, "spouse"),
         "children": _dedupe_named(r.get("children") for r in ordered),
@@ -387,6 +423,8 @@ def _merge(milestone_results: dict) -> dict:
             merged["hobbies"],
             merged["sports_interests"],
             merged["weekend_preferences"],
+            merged.get("side_hustles"),
+            merged.get("interesting_facts"),
             merged["family_background"],
             merged.get("spouse"),
             merged.get("children"),

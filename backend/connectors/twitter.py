@@ -1,17 +1,23 @@
-"""Twitter/X deep fetch: simple Google "{Name} Twitter" → first link → ScrapeCreators."""
+"""Twitter/X deep fetch: Google candidates → multi-signal rank → ScrapeCreators."""
 
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import List, Optional
 
 import requests
 
-from connectors.social_find import find_profile_link
+from connectors.social_find import (
+    find_profile_candidates,
+    find_profile_link,
+    pick_ranked_profile,
+    rank_profile_candidates,
+)
 from connectors.social_verify import verify_social_profile
 
 SCRAPECREATORS_BASE = "https://api.scrapecreators.com"
 TIMEOUT = 20
+MAX_RANK_CANDIDATES = 4
 
 
 def fetch_twitter(
@@ -21,62 +27,165 @@ def fetch_twitter(
     place: Optional[str] = None,
     twitter_url: Optional[str] = None,
     identity_hints: Optional[dict] = None,
+    search_constraints: Optional[dict] = None,
 ) -> dict:
     sc_key = os.environ.get("SCRAPECREATORS_API_KEY")
     if not sc_key:
         return {"status": "skipped", "reason": "SCRAPECREATORS_API_KEY not set"}
 
-    discovery = find_profile_link(name, "twitter", company=company, known_url=twitter_url)
-    if discovery.get("status") != "ok" or not discovery.get("handle"):
-        return {
-            "status": "not_found",
-            "discovery": discovery,
-            "reason": discovery.get("reason") or "no Twitter/X profile URL from Google",
-        }
+    hints = identity_hints or {}
+    hint = None
+    if search_constraints and isinstance(search_constraints, dict):
+        hint = (search_constraints.get("distinguishable_factor") or "").strip() or None
+    if not hint:
+        hint = (hints.get("distinguishable_factor") or hints.get("hint") or "").strip() or None
 
-    handle = discovery["handle"]
-    print(f"  [twitter] ScrapeCreators profile fetch: @{handle}")
-    profile_result = _fetch_profile(sc_key, handle)
-    if profile_result.get("status") not in ("ok", "no_public_data"):
-        return {
-            **profile_result,
-            "handle": handle,
-            "profile_url": discovery.get("url") or f"https://x.com/{handle}",
-            "discovery": discovery,
-        }
+    discovery = find_profile_candidates(
+        name,
+        "twitter",
+        company=company,
+        university=university,
+        distinguishable_factor=hint,
+        known_url=twitter_url,
+        max_candidates=MAX_RANK_CANDIDATES,
+        search_constraints=search_constraints,
+    )
+    cands = list(discovery.get("candidates") or [])
+    if not cands:
+        single = find_profile_link(name, "twitter", company=company, known_url=twitter_url)
+        if single.get("status") == "ok" and single.get("handle"):
+            cands = [
+                {
+                    "url": single.get("url"),
+                    "handle": single.get("handle"),
+                    "method": single.get("method"),
+                    "title": name,
+                }
+            ]
+            discovery = single
+        else:
+            return {
+                "status": "not_found",
+                "discovery": discovery,
+                "reason": discovery.get("reason") or "no Twitter/X profile URL from Google",
+            }
 
+    fetch_n = MAX_RANK_CANDIDATES if (hint or company or university or len(cands) > 1) else 1
+    profiles: List[dict] = []
+    for c in cands[:fetch_n]:
+        handle = (c.get("handle") or "").lstrip("@")
+        if not handle:
+            continue
+        print(f"  [twitter] ScrapeCreators profile fetch: @{handle}")
+        profile_result = _fetch_profile(sc_key, handle)
+        if profile_result.get("status") not in ("ok", "no_public_data"):
+            continue
+        profiles.append(
+            {
+                "handle": handle,
+                "profile_url": c.get("url") or f"https://x.com/{handle}",
+                "profile": profile_result.get("profile"),
+                "recent_posts": profile_result.get("recent_posts") or [],
+                "fetch_status": profile_result.get("status"),
+            }
+        )
+
+    if not profiles:
+        handle = (cands[0].get("handle") or "").lstrip("@")
+        profile_result = _fetch_profile(sc_key, handle) if handle else {"status": "not_found"}
+        if profile_result.get("status") not in ("ok", "no_public_data"):
+            return {
+                **profile_result,
+                "handle": handle,
+                "profile_url": cands[0].get("url") or (f"https://x.com/{handle}" if handle else None),
+                "discovery": discovery,
+            }
+        profiles = [
+            {
+                "handle": handle,
+                "profile_url": cands[0].get("url") or f"https://x.com/{handle}",
+                "profile": profile_result.get("profile"),
+                "recent_posts": profile_result.get("recent_posts") or [],
+                "fetch_status": profile_result.get("status"),
+            }
+        ]
+
+    chosen = profiles[0]
+    ranked = None
+    if len(profiles) > 1 or hint or company or university:
+        linkedin_slug = (hints.get("linkedin_slug") or "").strip() or None
+        ranked = rank_profile_candidates(
+            profiles,
+            name=name,
+            company=company,
+            university=university,
+            place=place,
+            hint=hint,
+            linkedin_slug=linkedin_slug,
+            profile_url_template="https://x.com/{handle}",
+        )
+        for row in (ranked or [])[:6]:
+            print(
+                f"  [twitter] variety @{row['handle']} total={row['identity_score']:.1f} "
+                f"signals={row.get('signals')}",
+                flush=True,
+            )
+        picked = pick_ranked_profile(ranked, profiles)
+        if picked:
+            chosen = picked
+            print(
+                f"  [twitter] multi-signal pick @{chosen.get('handle')} "
+                f"(score={(ranked[0] or {}).get('identity_score')})",
+                flush=True,
+            )
+        elif len(profiles) > 1 and ranked:
+            chosen = next(
+                (
+                    p
+                    for p in profiles
+                    if (p.get("handle") or "").lstrip("@").lower()
+                    == (ranked[0].get("handle") or "").lower()
+                ),
+                profiles[0],
+            )
+
+    handle = (chosen.get("handle") or "").lstrip("@")
     context = {
         "name": name,
         "company": company,
         "university": university,
         "place": place,
-        **(identity_hints or {}),
+        **hints,
         "platform": "twitter",
     }
-    verification = verify_social_profile(context, {
-        "handle": handle,
-        "url": discovery.get("url"),
-        "profile": profile_result.get("profile"),
-        "recent_posts": profile_result.get("recent_posts") or [],
-        "fetch_status": profile_result.get("status"),
-    })
+    verification = verify_social_profile(
+        context,
+        {
+            "handle": handle,
+            "url": chosen.get("profile_url"),
+            "profile": chosen.get("profile"),
+            "recent_posts": chosen.get("recent_posts") or [],
+            "fetch_status": chosen.get("fetch_status"),
+        },
+    )
 
     confidence = (verification or {}).get("confidence") or "low"
     is_match = (verification or {}).get("match") is True and confidence in ("high", "medium")
 
     base = {
         "handle": handle,
-        "profile_url": discovery.get("url") or f"https://x.com/{handle}",
+        "profile_url": chosen.get("profile_url") or f"https://x.com/{handle}",
         "discovery": discovery,
-        "profile": profile_result.get("profile"),
-        "recent_posts": profile_result.get("recent_posts") or [],
+        "profile": chosen.get("profile"),
+        "recent_posts": chosen.get("recent_posts") or [],
         "match_confidence": confidence,
         "match_score": (verification or {}).get("score"),
         "match_notes": (verification or {}).get("reasons") or [],
         "verification_summary": (verification or {}).get("summary"),
+        "identity_rankings": ranked[:6] if ranked else None,
     }
 
-    if profile_result.get("status") == "no_public_data":
+    if chosen.get("fetch_status") == "no_public_data":
         return {**base, "status": "no_public_data", "reason": "Twitter/X profile not publicly readable"}
 
     if not is_match and verification is not None:
@@ -90,7 +199,7 @@ def fetch_twitter(
 
     if verification is None:
         base["match_confidence"] = "medium"
-        base["match_notes"] = ["verifier unavailable — kept Google first-link result"]
+        base["match_notes"] = ["verifier unavailable — kept ranked Google result"]
 
     return {**base, "status": "ok"}
 

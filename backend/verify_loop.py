@@ -41,6 +41,66 @@ HIGH_TRUST_HOST_HINTS = (
 )
 
 
+def ingest_source(
+    graph: dict,
+    source_name: str,
+    block: Any,
+    *,
+    query: Optional[dict] = None,
+) -> None:
+    """Ingest one connector blob into a shared knowledge graph (task-wise merge)."""
+    if not isinstance(graph, dict) or not isinstance(block, dict):
+        return
+    query = query or {}
+    identity_id = graph.get("identity_id") or linkedin_slug(
+        normalize_linkedin_url(query.get("linkedin_url"))
+    ) or _slug_name(query.get("name"))
+    person = person_node_id(identity_id)
+    add_node(
+        graph,
+        node_id=person,
+        node_type="Person",
+        name=query.get("name"),
+        identity_id=identity_id,
+    )
+    canonical = normalize_linkedin_url(query.get("linkedin_url"))
+    name = source_name
+    if name == "apollo":
+        _ingest_apollo(graph, block, identity_id, person)
+    elif name == "linkedin_public":
+        _ingest_linkedin_public(graph, block, identity_id, person, canonical)
+    elif name == "gemini_search":
+        _ingest_gemini(graph, block, identity_id, person, canonical)
+    elif name == "personal_info":
+        _ingest_personal(graph, block, identity_id, person)
+    elif name == "deep_agent":
+        _ingest_deep(graph, block, identity_id, person)
+    elif name == "github":
+        _ingest_github(graph, block, identity_id, person)
+    elif name == "instagram_public":
+        _ingest_social(graph, block, "instagram_handle", identity_id)
+    elif name == "twitter_public":
+        _ingest_social(graph, block, "twitter_handle", identity_id)
+    elif name == "facebook_public":
+        _ingest_social(graph, block, "facebook_handle", identity_id)
+    elif name in ("nimble_pages", "page_extracts"):
+        _ingest_nimble_pages(graph, block, identity_id, person)
+
+
+def finalize_graph(graph: dict) -> dict:
+    """Corroborate + reject unsourced family after all parallel tasks finished."""
+    _corroborate(graph)
+    _reject_unsourced_family(graph)
+    return {
+        "status": "ok",
+        "identity_rule": IDENTITY_RULE,
+        "knowledge_graph": graph,
+        "conflicts": list(graph.get("conflicts") or []),
+        "verified_count": len(verified_claims(graph)),
+        "for_llm": claims_for_llm(graph),
+    }
+
+
 def run_verify_loop(
     *,
     query: dict,
@@ -403,6 +463,50 @@ def _ingest_github(graph, block, identity_id, person):
             source_urls=[url] if url else [],
             confidence=0.7 if tier == "confirmed" else 0.4,
             status="verified" if tier == "confirmed" else "unverified",
+            identity_id=identity_id,
+        )
+    # GraphQL enrichments (orgs / linked socials / activity)
+    for org in (block.get("organizations") or [])[:8]:
+        if not org:
+            continue
+        upsert_claim(
+            graph,
+            predicate="github_org",
+            obj=str(org),
+            text=f"GitHub org: {org}",
+            source_urls=[url] if url else [],
+            confidence=0.55,
+            status="unverified",
+            identity_id=identity_id,
+        )
+    for acct in (block.get("social_accounts") or [])[:8]:
+        if not isinstance(acct, dict):
+            continue
+        provider = (acct.get("provider") or "").lower()
+        handle_s = acct.get("handle") or acct.get("displayName")
+        if not provider or not handle_s:
+            continue
+        upsert_claim(
+            graph,
+            predicate=f"github_linked_{provider}",
+            obj=str(handle_s),
+            text=f"GitHub-linked {provider}: {handle_s}",
+            source_urls=[acct.get("url") or url] if (acct.get("url") or url) else [],
+            confidence=0.6,
+            status="unverified",
+            identity_id=identity_id,
+        )
+    contrib = block.get("contributions") or {}
+    total = contrib.get("total") or contrib.get("total_last_year")
+    if total is not None:
+        upsert_claim(
+            graph,
+            predicate="github_contributions_year",
+            obj=str(total),
+            text=f"~{total} GitHub contributions last year",
+            source_urls=[url] if url else [],
+            confidence=0.5,
+            status="unverified",
             identity_id=identity_id,
         )
 

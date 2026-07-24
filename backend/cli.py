@@ -16,7 +16,7 @@ from common_ground import (
     public_conversation,
 )
 from connectors import gemini_search
-from merge import merge_profile
+from merge import attach_verified_knowledge_graph, merge_profile
 from orchestrator import PersonQuery, SearchOrchestrator
 from storage import SOCIAL_SOURCES, ProfileStore
 from synthesize import summarize_profile
@@ -161,6 +161,8 @@ def run_search(
     )
 
     for source, result in raw_results.items():
+        if source.startswith("_"):
+            continue
         detail = result.get("reason") or result.get("error") or ""
         suffix = f" ({detail})" if detail else ""
         print(f"  [{source}] {result.get('status')}{suffix}")
@@ -186,11 +188,19 @@ def run_search(
         },
         raw_results=raw_results,
     )
+    prior_kg = (existing or {}).get("knowledge_graph") or (existing or {}).get("latest_knowledge_graph")
+    attach_verified_knowledge_graph(
+        merged, prior_graph=prior_kg if isinstance(prior_kg, dict) else None
+    )
 
     # Only worth re-summarizing if a freshly-fetched source actually found something
     # new — a locally-skipped connector (e.g. no PatentsView key) re-attempting every
     # run and coming back empty shouldn't be enough to trigger a fresh Gemini call.
-    has_new_data = any(result.get("status") == "ok" for result in raw_results.values())
+    has_new_data = any(
+        result.get("status") == "ok"
+        for name, result in raw_results.items()
+        if not name.startswith("_")
+    )
     if not has_new_data and existing and existing.get("latest_summary"):
         print("\nNothing new found — skipping the Gemini call entirely, reusing cached summary.")
         summary = existing["latest_summary"]

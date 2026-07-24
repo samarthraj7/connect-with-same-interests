@@ -5,6 +5,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -155,9 +156,15 @@ export default function PersonDetail() {
   const [chatMessages, setChatMessages] = useState<{ role: "user" | "assistant"; content: string }[]>(
     [],
   );
+  const { width } = useWindowDimensions();
+  const sideChat = width >= 900;
 
   useEffect(() => {
     if (!name) return;
+    // Reset chat whenever the person (or draft) changes
+    setChatMessages([]);
+    setChatInput("");
+    setChatError("");
     (async () => {
       try {
         if (draftId) {
@@ -216,7 +223,7 @@ export default function PersonDetail() {
         rating,
         wrong_notes: rating === "bad" ? ratingNotes.trim() || undefined : undefined,
         wrong_categories: rating === "bad" ? ["quality"] : undefined,
-        auto_retry: false,
+        auto_retry: rating === "bad",
       });
       setShowBadForm(false);
       if (rating === "good" && res.committed) {
@@ -235,14 +242,38 @@ export default function PersonDetail() {
         return;
       }
 
-      // Bad → re-research same identity with stored corrections
+      // Bad → server re-researches with notes (+ LinkedIn rediscovery when flagged)
+      if (rating === "bad" && res.retried && res.draft_id) {
+        setPendingDraftId(res.draft_id);
+        setRatingNotes("");
+        const li = res.linkedin_url || pickedLinkedin;
+        if (li) setPickedLinkedin(li);
+        setData({
+          name: res.name || name,
+          company: res.company || company || "",
+          summary: res.summary,
+          conversation: res.conversation,
+          needs_rating: true,
+          draft_id: res.draft_id,
+          linkedin_url: li,
+          contact: { linkedin_url: li },
+          sources: res.sources || {},
+        });
+        setError(res.message || "Re-researched with your corrections — review again.");
+        return;
+      }
+
+      // Fallback: client re-research using corrected LinkedIn from feedback
       setPendingDraftId(null);
       setError("Re-researching with your corrections…");
+      const correctedLi =
+        res.linkedin_url !== undefined ? res.linkedin_url : pickedLinkedin || null;
+      if (correctedLi) setPickedLinkedin(correctedLi);
       const researched = await api.research({
         name: res.name || name,
         company: res.company || company || null,
         university: res.university || null,
-        linkedin_url: res.linkedin_url || pickedLinkedin || null,
+        linkedin_url: correctedLi,
         force_refresh: true,
         auto_commit: false,
       });
@@ -350,10 +381,43 @@ export default function PersonDetail() {
     }
   };
 
+  const chatPanel = (
+    <View style={sideChat ? styles.chatSide : styles.chatBottom}>
+      <SectionTitle>Ask about them</SectionTitle>
+      <Body>
+        Chat about this dossier. Resets when you open another person.
+      </Body>
+      <ScrollView style={sideChat ? { maxHeight: 420 } : undefined} nestedScrollEnabled>
+        {chatMessages.map((m, i) => (
+          <View
+            key={`${m.role}-${i}`}
+            style={[
+              styles.card,
+              m.role === "user" ? { borderColor: colors.forest } : null,
+            ]}
+          >
+            <Text style={styles.cardMeta}>{m.role === "user" ? "You" : "Connect Deeply"}</Text>
+            <Text style={styles.cardBody}>{m.content}</Text>
+          </View>
+        ))}
+      </ScrollView>
+      {chatError ? <Text style={styles.err}>{chatError}</Text> : null}
+      <Field
+        label="Question"
+        value={chatInput}
+        onChangeText={setChatInput}
+        placeholder="What should I open with? Any shared cities?"
+        multiline
+      />
+      <Button title={chatBusy ? "Thinking…" : "Ask"} onPress={askChat} loading={chatBusy} style={{ marginBottom: 8 }} />
+    </View>
+  );
+
   return (
     <ScreenBackdrop>
       <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
-        <ScrollView contentContainerStyle={styles.pad}>
+        <View style={sideChat ? styles.row : { flex: 1 }}>
+        <ScrollView style={sideChat ? { flex: 1 } : undefined} contentContainerStyle={styles.pad}>
           <Button title="← Back" variant="ghost" onPress={() => router.back()} style={{ alignSelf: "flex-start", marginBottom: 8 }} />
           <Text style={styles.name}>{data?.name || name}</Text>
           {data?.company ? <Text style={styles.company}>{data.company}</Text> : null}
@@ -523,32 +587,6 @@ export default function PersonDetail() {
             </>
           ) : null}
 
-          <SectionTitle>Ask about them</SectionTitle>
-          <Body>
-            Chat about this dossier and conversation ideas. Answers stay grounded in what we researched.
-          </Body>
-          {chatMessages.map((m, i) => (
-            <View
-              key={`${m.role}-${i}`}
-              style={[
-                styles.card,
-                m.role === "user" ? { borderColor: colors.forest } : null,
-              ]}
-            >
-              <Text style={styles.cardMeta}>{m.role === "user" ? "You" : "Connect Deeply"}</Text>
-              <Text style={styles.cardBody}>{m.content}</Text>
-            </View>
-          ))}
-          {chatError ? <Text style={styles.err}>{chatError}</Text> : null}
-          <Field
-            label="Question"
-            value={chatInput}
-            onChangeText={setChatInput}
-            placeholder="What should I open with? Any shared cities?"
-            multiline
-          />
-          <Button title={chatBusy ? "Thinking…" : "Ask"} onPress={askChat} loading={chatBusy} style={{ marginBottom: 8 }} />
-
           {/* 3. Full dossier */}
           <SectionTitle>Career</SectionTitle>
           {(summary.career_history || []).length ? (
@@ -583,6 +621,8 @@ export default function PersonDetail() {
           <Fact label="Hobbies" value={personal.hobbies} />
           <Fact label="Sports" value={personal.sports_interests} />
           <Fact label="Weekends" value={personal.weekend_preferences} />
+          <Fact label="Side hustles / projects" value={personal.side_hustles} />
+          <ListSection title="Interesting facts (talk about these)" items={personal.interesting_facts} />
           <Fact label="Family" value={personal.family_background} />
           <Fact label="Spouse / partner" value={personal.spouse || summary.family?.spouse} />
           {(personal.children || summary.family?.children || []).length ? (
@@ -728,7 +768,10 @@ export default function PersonDetail() {
               [{f.status}] {f.claim}
             </Bullet>
           ))}
+          {!sideChat ? chatPanel : null}
         </ScrollView>
+        {sideChat ? chatPanel : null}
+        </View>
       </SafeAreaView>
     </ScreenBackdrop>
   );
@@ -736,6 +779,20 @@ export default function PersonDetail() {
 
 const styles = StyleSheet.create({
   pad: { padding: space.lg, paddingBottom: 56 },
+  row: { flex: 1, flexDirection: "row" },
+  chatSide: {
+    width: 340,
+    borderLeftWidth: 1,
+    borderLeftColor: colors.line,
+    padding: space.md,
+    backgroundColor: "rgba(251,252,250,0.92)",
+  },
+  chatBottom: {
+    marginTop: space.lg,
+    paddingTop: space.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+  },
   name: { fontFamily: fonts.display, fontSize: 34, color: colors.ink, letterSpacing: -0.6 },
   company: { fontFamily: fonts.body, color: colors.muted, marginBottom: 4 },
   meta: { fontFamily: fonts.body, color: colors.leaf, marginBottom: space.md, fontSize: 13 },

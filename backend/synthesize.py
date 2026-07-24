@@ -80,6 +80,11 @@ weekends, family). Respect its gap-handling:
   personal_info in the output.
 - Use null / [] when missing. Never invent hometown from a university alone.
 - Lightly fold confirmed hobbies into interests when present.
+- Also map personal_info.side_hustles and personal_info.interesting_facts when present.
+- Mine instagram_public / twitter_public / facebook_public / public_web for UNIQUE
+  conversation fuel (unusual hobbies, side projects, quirky posts) — put the best
+  into personal_info.interesting_facts and fold 1–3 into interests / notable_points.
+  Prefer non-LinkedIn evidence. Never invent.
 - personal_notes and evidence facts should end with (url) when a source URL exists.
 
 ### SECTION 3: OUTPUT FORMAT
@@ -117,6 +122,8 @@ Respond ONLY with a valid JSON object matching the exact schema below. Do not in
     "hobbies": [string],
     "sports_interests": [string],
     "weekend_preferences": [string],
+    "side_hustles": [string],
+    "interesting_facts": [string],
     "family_background": [string],
     "spouse": string or null,
     "children": [{"name": string or null, "school": string or null, "company": string or null, "note": string or null}],
@@ -288,9 +295,58 @@ def _backfill_family_fields(parsed: dict, sources: dict) -> dict:
         "estimated_age_band",
         "estimated_age_basis",
         "bachelors_year",
+        "hobbies",
+        "sports_interests",
+        "weekend_preferences",
+        "side_hustles",
+        "interesting_facts",
+        "personal_notes",
     ):
         if not out_pi.get(key) and pi.get(key):
             out_pi[key] = pi[key]
+
+    # Fold unique public social snippets into interesting_facts when thin
+    facts = list(out_pi.get("interesting_facts") or [])
+    if len(facts) < 4:
+        for src_key in ("instagram_public", "twitter_public", "facebook_public"):
+            block = sources.get(src_key) if isinstance(sources.get(src_key), dict) else {}
+            if block.get("status") != "ok":
+                continue
+            conf = (block.get("match_confidence") or "").lower()
+            if conf and conf not in ("high", "medium"):
+                continue
+            bio = ((block.get("profile") or {}).get("biography") or (block.get("profile") or {}).get("bio") or "").strip()
+            if bio and len(bio) > 20:
+                line = f"Public bio (@{block.get('handle')}): {bio[:180]}"
+                if line not in facts:
+                    facts.append(line)
+            for p in (block.get("recent_posts") or [])[:3]:
+                if not isinstance(p, dict):
+                    continue
+                cap = (p.get("caption") or p.get("snippet") or "").strip()
+                if len(cap) < 24:
+                    continue
+                line = cap[:200]
+                if line not in facts:
+                    facts.append(line)
+                if len(facts) >= 6:
+                    break
+            if len(facts) >= 6:
+                break
+    if facts:
+        out_pi["interesting_facts"] = facts[:8]
+
+    # Fold side hustles / interesting facts into interests lightly
+    interests = list(parsed.get("interests") or [])
+    for item in (out_pi.get("side_hustles") or [])[:3]:
+        if item and item not in interests:
+            interests.append(item)
+    for item in (out_pi.get("interesting_facts") or [])[:2]:
+        short = str(item).split(":")[-1].strip() if ":" in str(item) else str(item)
+        if short and len(short) < 80 and short not in interests:
+            interests.append(short)
+    if interests:
+        parsed["interests"] = interests[:16]
 
     family = parsed.get("family") if isinstance(parsed.get("family"), dict) else {}
     if not isinstance(family, dict):
